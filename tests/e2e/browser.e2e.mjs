@@ -310,9 +310,9 @@ try {
   fs.writeFileSync(path.join(ART, 'corrupt.json'), '{"format":"screenlab-backup","version":1,"project":{"title":"x"},"references":[{');
   await page.goto(`${APP}/projects`);
   await page.getByRole('button', { name: 'Import project' }).click();
-  await page.getByLabel('Backup file').setInputFiles(path.join(ART, 'corrupt.json'));
+  await page.getByLabel('Project file').setInputFiles(path.join(ART, 'corrupt.json'));
   check('Corrupted backup is rejected with a clear message', await visible(page.getByText(/not valid JSON/)));
-  await page.getByLabel('Backup file').setInputFiles(backupPath);
+  await page.getByLabel('Project file').setInputFiles(backupPath);
   await page.getByLabel('Name for the restored project').fill('Restored E2E project');
   await page.getByRole('button', { name: 'Restore as new project' }).click();
   await page.getByRole('heading', { name: 'Restored E2E project' }).waitFor({ timeout: 60000 });
@@ -463,6 +463,21 @@ try {
   check('Screening continues at the first record still unscreened', (await currentTitle(page)) === 'Fictional editorial D');
   await page.locator('aside[aria-label="Screening controls"] details summary').click();
   check('Conflict from Rayyan is explained in the notes', (await page.locator('aside[aria-label="Screening controls"] #notes').inputValue()).includes('Reviewers disagreed'));
+
+  // Rayyan .zip through Projects → "Import project"
+  await page.goto(`${APP}/projects`);
+  await page.getByRole('button', { name: 'Import project' }).click();
+  await page.getByLabel('Project file').setInputFiles(path.join(FX, 'rayyan-export.zip'));
+  await page.getByLabel('Name for the new review').fill('My Rayyan review');
+  await page.getByRole('button', { name: 'Create project and continue' }).click();
+  await page.getByRole('heading', { name: 'Import preview' }).waitFor({ timeout: 30000 });
+  check('"Import project" accepts a Rayyan .zip and opens the preview in a new project', await visible(page.getByTestId('rayyan-panel')));
+  await shot(page, '24-import-project-rayyan');
+  await page.getByRole('button', { name: /^Import 5 references$/ }).click();
+  await page.getByRole('heading', { name: '✓ Import complete' }).waitFor({ timeout: 60000 });
+  const viaId = page.url().split('/p/')[1].split('/')[0];
+  check('…project created with Rayyan decisions and source "Rayyan"',
+    sql(`select p.title || ':' || count(r.*) filter (where r.title_abstract_decision is not null) || ':' || min(r.database_source) from projects p join study_references r on r.project_id = p.id where p.id='${viaId}' group by p.title`) === 'My Rayyan review:3:Rayyan');
 
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);

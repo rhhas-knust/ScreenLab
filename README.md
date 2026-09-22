@@ -209,8 +209,11 @@ the next article* in the decision panel if you prefer to stay on an article afte
 
 1. In Rayyan, export your review (CSV is best; RIS and BibTeX also work). Rayyan downloads a
    `.zip` file — you do not need to unzip it.
-2. In ScreenLab create the review, then **Import references** and choose the `.zip`.
-   Pick “Other → Rayyan” (or the original database) as the source.
+2. In ScreenLab either
+   - go to **Projects → Import project**, choose the `.zip` and name the review — ScreenLab
+     creates the project and opens the import preview with your file; or
+   - create the review yourself, then **Import references** and choose the `.zip`
+     (pick “Other → Rayyan” or the original database as the source).
 3. The preview shows **“Rayyan screening data found”**: how many records you had included,
    excluded or marked maybe, your labels and exclusion reasons. Leave **“Continue my Rayyan
    screening”** ticked to carry them over:
@@ -240,7 +243,8 @@ the title/abstract stage; records you included move on to full-text screening as
 settings, all references, decisions, exclusion reasons, notes, tags, duplicate information, the
 full screening history and the activity log.
 
-**Restore** — *Projects → Import project* → choose the backup file. It is restored as a **new
+**Restore** — *Projects → Import project* → choose the backup file (the same button also
+accepts a Rayyan `.zip` to start a new project from it). It is restored as a **new
 project** (existing projects are never overwritten). If anything goes wrong during a restore,
 the half-restored project is removed automatically. Uploaded PDFs are not inside the backup
 file; re-upload them if needed.

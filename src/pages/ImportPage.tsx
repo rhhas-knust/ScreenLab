@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ParseRequest, ParseResponse, ParseStats } from '../lib/import/parse.worker';
@@ -7,6 +7,7 @@ import { checkExistingMatches, importRecords, type ImportOutcome } from '../lib/
 import { detectDuplicates } from '../lib/api/duplicates';
 import { friendlyError } from '../lib/errors';
 import { fmt } from '../lib/hooks';
+import { takePendingImport } from '../lib/pendingImport';
 import { Alert, Button, Card, Field, Input, ProgressBar, Select, Spinner } from '../components/ui';
 
 const SOURCES = ['PubMed', 'Scopus', 'Web of Science', 'IEEE Xplore', 'Google Scholar', 'Embase', 'CINAHL', 'Cochrane Library', 'PsycINFO', 'Other'];
@@ -77,7 +78,8 @@ export function ImportPage() {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const analyse = async (zipEntry?: string) => {
+  const analyse = async (zipEntry?: string, chosen: File | null = file) => {
+    const file = chosen;
     if (!file) return;
     setError(null);
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
@@ -115,6 +117,22 @@ export function ImportPage() {
       setPhase('choose');
     }
   };
+
+  // A file chosen in Projects → "Import project" (e.g. a Rayyan .zip) starts the preview directly.
+  const handedOver = useRef(false);
+  useEffect(() => {
+    if (handedOver.current) return;
+    handedOver.current = true;
+    const f = takePendingImport(projectId);
+    if (!f) return;
+    setFile(f);
+    if (/\.zip$/i.test(f.name) || /rayyan/i.test(f.name)) {
+      setSourceChoice('Other');
+      setCustomSource('Rayyan');
+    }
+    void analyse(undefined, f);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const recordsToImport = () => (result ? result.records.filter((r) => includeUntitled || r.title) : []);
 
