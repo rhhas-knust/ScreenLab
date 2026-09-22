@@ -233,6 +233,9 @@ create index if not exists refs_dupgroup_idx on public.study_references(duplicat
 create index if not exists refs_search_trgm_idx on public.study_references using gin (search_text extensions.gin_trgm_ops);
 create index if not exists refs_title_trgm_idx on public.study_references using gin (title_norm extensions.gin_trgm_ops);
 create index if not exists refs_tags_idx on public.study_references using gin (tag_names);
+-- Foreign keys: without these, deleting a large project scans the table once per deleted row.
+create index if not exists refs_merged_into_idx on public.study_references(merged_into_id) where merged_into_id is not null;
+create index if not exists refs_import_batch_idx on public.study_references(import_batch_id);
 
 create or replace function public.refs_derive_fields()
 returns trigger language plpgsql
@@ -1101,3 +1104,10 @@ revoke execute on function public.on_tag_changed() from public, anon, authentica
 revoke execute on function public.check_reference_project() from public, anon, authenticated;
 revoke execute on function public.refs_derive_fields() from public, anon, authenticated;
 revoke execute on function public.touch_updated_at() from public, anon, authenticated;
+
+-- Indexes for user foreign keys (fast account deletion).
+create index if not exists activity_logs_user_idx on public.activity_logs(user_id);
+create index if not exists full_text_files_uploaded_by_idx on public.full_text_files(uploaded_by);
+create index if not exists import_batches_imported_by_idx on public.import_batches(imported_by);
+create index if not exists reviewer_decisions_reviewer_idx on public.reviewer_decisions(reviewer_id);
+create index if not exists screening_decisions_reviewer_idx on public.screening_decisions(reviewer_id);
