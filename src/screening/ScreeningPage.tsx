@@ -10,11 +10,12 @@ import { friendlyError } from '../lib/errors';
 import { fmt, pct, qk, useFacets, useProject, useReasons, useSettings, useStats, useTags } from '../lib/hooks';
 import { outbox } from '../lib/outbox';
 import { useFilterParams } from '../lib/useFilterParams';
+import { useMediaQuery } from '../lib/useMediaQuery';
 import type { Decision, Reference, ReferenceListItem, Stage } from '../lib/types';
 import { DECISION_META, DecisionBadge, DecisionIcon } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
 import { CriteriaView } from '../components/CriteriaView';
-import { Alert, Button, Input, Kbd, Modal, PageLoader, ProgressBar, Spinner, cx } from '../components/ui';
+import { Alert, Button, Input, Modal, PageLoader, ProgressBar, Spinner, cx } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { ArticleView } from './ArticleView';
 import { ConfirmChangeBar, DecisionButtons, ReasonPicker, type PendingChange } from './DecisionPanel';
@@ -69,6 +70,10 @@ export function ScreeningPage() {
   const { data: facets } = useFacets(projectId);
   const { filters, sort, stage: stageParam, refId, update, setFilters, clearFilters, setSort, activeFilterCount } = useFilterParams();
   const stage: Stage = settings && !settings.stage2_enabled ? 'title_abstract' : stageParam;
+  // Each panel is rendered exactly once: in the side columns on wide screens,
+  // in the drawer / below the article / bottom bar on narrow ones.
+  const isXl = useMediaQuery('(min-width: 1280px)');
+  const isLg = useMediaQuery('(min-width: 1024px)');
 
   const [current, setCurrent] = useState<Reference | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,18 +201,72 @@ export function ScreeningPage() {
     }
   }, [isUnscreened, refill, show, toast, update]);
 
-  // Initial load, and whenever the stage / filters / sort change
-  const firstLoad = useRef(true);
-  useEffect(() => {
-    queueRef.current = [];
-    setPage(0);
-    if (firstLoad.current && refId) {
-      firstLoad.current = false;
-      void openById(refId);
+  /**
+   * Review mode: when the status filter targets already-screened articles
+   * (e.g. "Maybe"), step through that filtered list in order instead of
+   * looking for unscreened articles.
+   */
+  const reviewMode = filters.status !== 'all' && filters.status !== 'unscreened';
+  // Prefetched "next in view" so advancing is instant and works offline.
+  const nextInView = useRef<{ afterId: string; key: string; ref: Reference | null } | null>(null);
+  const advanceInView = useCallback(async (after: Reference | null) => {
+    const seq = ++navSeq.current;
+    const pre = nextInView.current;
+    if (after && pre && pre.afterId === after.id && pre.key === filterKey) {
+      if (pre.ref) show(pre.ref);
+      else {
+        setCurrent(null);
+        setAllDone(true);
+        update({ ref: null });
+      }
       return;
     }
-    firstLoad.current = false;
-    void goNextUnscreened(null);
+    setLoading(true);
+    try {
+      let r: Reference | null = null;
+      if (after) {
+        r = await neighbor(projectId, stage, filters, sort, after, 'next');
+      } else {
+        const first = await listReferences(projectId, stage, filters, sort, 0, 1);
+        r = first.rows[0] ? await getReference(first.rows[0].id) : null;
+      }
+      if (seq !== navSeq.current) return;
+      if (r) show(r);
+      else {
+        setCurrent(null);
+        setAllDone(true);
+        update({ ref: null });
+      }
+    } catch (e) {
+      if (seq === navSeq.current) toast(`Could not load the next article: ${friendlyError(e)}`, { kind: 'error' });
+    } finally {
+      if (seq === navSeq.current) setLoading(false);
+    }
+  }, [projectId, stage, filters, sort, show, update, toast, filterKey]);
+  const advance = reviewMode ? advanceInView : goNextUnscreened;
+  const currentId = current?.id;
+  useEffect(() => {
+    if (!reviewMode || !current) return;
+    const afterId = current.id;
+    const key = filterKey;
+    neighbor(projectId, stage, filters, sort, current, 'next')
+      .then((ref) => { nextInView.current = { afterId, key, ref }; })
+      .catch(() => { /* prefetch only */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewMode, currentId, filterKey]);
+
+  // Initial load (open the article in the URL, if any), then whenever the
+  // stage / filters / sort change, jump to the first unscreened article.
+  // Keyed on filterKey so a repeated effect run (React StrictMode) is a no-op.
+  const handledKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (handledKey.current === filterKey) return;
+    const first = handledKey.current === null;
+    handledKey.current = filterKey;
+    queueRef.current = [];
+    setPage(0);
+    if (first && refId) void openById(refId);
+    else void advance(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);
 
@@ -260,7 +319,7 @@ export function ScreeningPage() {
     const newReason = decision === 'exclude' ? reason ?? null : null;
     if (prevD === decision && prevR === newReason) {
       setReasonOpen(false);
-      if (autoAdvance) void goNextUnscreened(cur);
+      if (autoAdvance) void advance(cur);
       return;
     }
     if (prevD && !confirmed) {
@@ -283,10 +342,10 @@ export function ScreeningPage() {
     toast(`${prevD ? `Changed to ${decisionText(decision, newReason)}` : decisionText(decision, newReason)}`, {
       action: { label: 'Undo', onClick: () => undoRef.current() },
     });
-    if (autoAdvance) void goNextUnscreened(cur);
+    if (autoAdvance) void advance(cur);
     else setCurrent(updated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, stage, projectId, autoAdvance, goNextUnscreened, patchListCache, toast]);
+  }, [current, stage, projectId, autoAdvance, advance, patchListCache, toast]);
 
   const undo = useCallback(() => {
     const entry = undoStack[undoStack.length - 1];
@@ -348,7 +407,7 @@ export function ScreeningPage() {
       qc.invalidateQueries({ queryKey: qk.refs(projectId) });
       if (status === 'duplicate') {
         toast('Marked as duplicate — removed from screening', { action: { label: 'Undo', onClick: () => { void setDuplicateStatus(r.id, 'none').then((x) => { show(x); qc.invalidateQueries({ queryKey: qk.stats(projectId) }); }); } } });
-        void goNextUnscreened(current);
+        void advance(current);
       } else {
         show(r);
       }
@@ -400,7 +459,7 @@ export function ScreeningPage() {
       p: () => void go('prev'),
       u: () => undo(),
       '/': () => {
-        setListOpen(true);
+        if (!isXl) setListOpen(true);
         setTimeout(() => searchRef.current?.focus(), 30);
       },
       '?': () => setHelpOpen(true),
@@ -450,7 +509,7 @@ export function ScreeningPage() {
             onKeyDown={(e) => { if (e.key === 'Enter') setFilters({ q: searchText }); }} />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <Button size="sm" variant={activeFilterCount ? 'subtle' : 'ghost'} onClick={() => setFiltersOpen((x) => !x)} aria-expanded={filtersOpen}>
+          <Button size="sm" className="whitespace-nowrap" variant={activeFilterCount ? 'subtle' : 'ghost'} onClick={() => setFiltersOpen((x) => !x)} aria-expanded={filtersOpen}>
             Filters{activeFilterCount ? ` (${activeFilterCount})` : ''} {filtersOpen ? '▴' : '▾'}
           </Button>
           <SortControl sort={sort} setSort={setSort} id="screen-sort" />
@@ -544,8 +603,8 @@ export function ScreeningPage() {
   return (
     <div className="flex h-full min-h-0">
       {/* LEFT: search, filters, list */}
-      <aside className="hidden w-80 shrink-0 border-r border-slate-200 bg-white xl:block" aria-label="Article list">{listPanel}</aside>
-      {listOpen && (
+      {isXl && <aside className="w-80 shrink-0 border-r border-slate-200 bg-white" aria-label="Article list">{listPanel}</aside>}
+      {!isXl && listOpen && (
         <div className="fixed inset-0 z-40 xl:hidden" role="dialog" aria-label="Article list">
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setListOpen(false)} />
           <div className="absolute inset-y-0 left-0 flex w-[min(24rem,90vw)] flex-col bg-white shadow-xl">
@@ -561,13 +620,13 @@ export function ScreeningPage() {
       {/* CENTRE: article */}
       <section ref={centerRef} className="min-w-0 flex-1 overflow-y-auto bg-white lg:bg-slate-50" aria-label="Article details">
         <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur">
-          <Button size="sm" variant="subtle" className="xl:hidden" onClick={() => setListOpen(true)} aria-label="Show article list, search and filters">☰ List</Button>
+          {!isXl && <Button size="sm" variant="subtle" onClick={() => setListOpen(true)} aria-label="Show article list, search and filters">☰ List</Button>}
           <span className="truncate text-xs text-slate-600 sm:text-sm">
             <strong className="text-ink-900">{stage === 'title_abstract' ? 'Title / abstract screening' : 'Full-text screening'}</strong>
             <span className="tabular-nums"> · {fmt(done)} / {fmt(total)} screened</span>
           </span>
           <div className="ml-auto flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setCriteriaOpen(true)} aria-keyshortcuts="C">Review criteria</Button>
+            <Button size="sm" variant="ghost" onClick={() => setCriteriaOpen(true)} aria-keyshortcuts="C"><span className="hidden sm:inline">Review</span> criteria</Button>
             <Button size="sm" variant="ghost" onClick={() => setHelpOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">⌨<span className="hidden sm:inline"> Shortcuts</span></Button>
           </div>
         </div>
@@ -582,12 +641,12 @@ export function ScreeningPage() {
           <div className="mx-auto max-w-xl p-8 text-center">
             <div className="text-4xl" aria-hidden="true">✓</div>
             <h1 className="mt-2 text-xl font-semibold text-ink-900">
-              {total === 0 && stage === 'title_abstract' && !activeFilterCount && !filters.q ? 'No references to screen yet' : 'All caught up'}
+              {total === 0 && stage === 'title_abstract' && !activeFilterCount && !filters.q ? 'No references to screen yet' : reviewMode ? 'End of this list' : 'All caught up'}
             </h1>
             <p className="mt-2 text-sm text-slate-600">
               {total === 0 && stage === 'title_abstract' && !activeFilterCount && !filters.q
                 ? 'Import references to start screening.'
-                : `There are no unscreened articles${activeFilterCount || filters.q ? ' matching the current search and filters' : ` at the ${stage === 'title_abstract' ? 'title/abstract' : 'full-text'} stage`}.`}
+                : reviewMode ? 'There are no more articles matching the current status filter and search.' : `There are no unscreened articles${activeFilterCount || filters.q ? ' matching the current search and filters' : ` at the ${stage === 'title_abstract' ? 'title/abstract' : 'full-text'} stage`}.`}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {total === 0 && stage === 'title_abstract' && <Button variant="primary" onClick={() => nav(`/p/${projectId}/import`)}>Import references</Button>}
@@ -595,7 +654,7 @@ export function ScreeningPage() {
               {stage === 'title_abstract' && settings.stage2_enabled && (stats?.ft_unscreened ?? 0) > 0 && (
                 <Button variant="primary" onClick={() => update({ stage: 'full_text', ref: null })}>Go to full-text screening ({fmt(stats?.ft_unscreened)})</Button>
               )}
-              <Button onClick={() => { setListOpen(true); }} className="xl:hidden">Browse screened articles</Button>
+              {!isXl && <Button onClick={() => setListOpen(true)}>Browse screened articles</Button>}
               <Button variant="ghost" onClick={() => nav(`/p/${projectId}`)}>Back to dashboard</Button>
             </div>
           </div>
@@ -607,14 +666,15 @@ export function ScreeningPage() {
               </div>
             )}
             <ArticleView reference={current} stage={stage} terms={terms} />
-            <div className="mx-auto max-w-3xl border-t border-slate-200 px-4 py-5 sm:px-6 lg:hidden">{detailPanels}</div>
-            <div className="h-44 lg:hidden" aria-hidden="true" />
+            {!isLg && <div className="mx-auto max-w-3xl border-t border-slate-200 px-4 py-5 sm:px-6">{detailPanels}</div>}
+            {!isLg && <div className="h-44" aria-hidden="true" />}
           </div>
         )}
       </section>
 
       {/* RIGHT: decision controls */}
-      <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white lg:flex" aria-label="Screening controls">
+      {isLg && (
+      <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white" aria-label="Screening controls">
         {current && !allDone && (
           <div className="space-y-4 p-4">
             <div className="space-y-2">
@@ -623,26 +683,27 @@ export function ScreeningPage() {
               {confirmBar}
               {reasonPicker}
               <div className="grid grid-cols-3 gap-1">
-                <Button size="sm" onClick={() => void go('prev')} aria-keyshortcuts="P">← Prev <Kbd>P</Kbd></Button>
-                <Button size="sm" onClick={() => void go('next')} aria-keyshortcuts="N">Next → <Kbd>N</Kbd></Button>
-                <Button size="sm" onClick={undo} disabled={!undoStack.length} aria-keyshortcuts="U">Undo <Kbd>U</Kbd></Button>
+                <Button size="sm" onClick={() => void go('prev')} aria-keyshortcuts="P" title="Previous article (P)">← Prev</Button>
+                <Button size="sm" onClick={() => void go('next')} aria-keyshortcuts="N" title="Next article (N)">Next →</Button>
+                <Button size="sm" onClick={undo} disabled={!undoStack.length} aria-keyshortcuts="U" title="Undo last decision (U)">↶ Undo</Button>
               </div>
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 <input type="checkbox" checked={autoAdvance} onChange={(e) => {
                   setAutoAdvance(e.target.checked);
                   try { localStorage.setItem('screenlab:autoAdvance', e.target.checked ? '1' : '0'); } catch { /* ignore */ }
                 }} />
-                Automatically open the next unscreened article
+                Automatically open the next article after a decision
               </label>
             </div>
             <div className="border-t border-slate-200 pt-4">{detailPanels}</div>
           </div>
         )}
       </aside>
+      )}
 
       {/* MOBILE / TABLET: bottom decision bar */}
-      {current && !allDone && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/97 p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] lg:hidden">
+      {!isLg && current && !allDone && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/97 p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
           <div className="mx-auto max-w-3xl space-y-2">
             {(reasonOpen || pendingChange) && <div className="max-h-[55vh] overflow-y-auto">{confirmBar}{reasonPicker}</div>}
             <DecisionButtons stage={stage} current={curDecision} onDecide={(d) => decide(d)} size="md" />

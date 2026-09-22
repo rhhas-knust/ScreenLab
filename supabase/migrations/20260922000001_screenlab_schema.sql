@@ -515,8 +515,10 @@ begin
                   where r.id = new.reference_id and r.project_id = new.project_id) then
     raise exception 'Reference does not belong to this project' using errcode = '42501';
   end if;
+  -- to_jsonb() because only reference_tags has a tag_id column
   if tg_table_name = 'reference_tags' and not exists (
-       select 1 from public.tags t where t.id = new.tag_id and t.project_id = new.project_id) then
+       select 1 from public.tags t
+        where t.id = (to_jsonb(new) ->> 'tag_id')::uuid and t.project_id = new.project_id) then
     raise exception 'Tag does not belong to this project' using errcode = '42501';
   end if;
   return new;
@@ -784,34 +786,52 @@ create or replace function public.find_duplicate_pairs(
 )
 returns table (a uuid, b uuid, match_type text, score real)
 language plpgsql stable
+-- SECURITY DEFINER: under row-level security Postgres cannot use the trigram
+-- index for the (non-leakproof) % operator, which made fuzzy matching ~20x
+-- slower. Access is checked explicitly below instead, and every query is
+-- restricted to p_project_id. The function only reads data.
+security definer
 set search_path = public, extensions
 as $$
 begin
+  if not exists (select 1 from public.project_members m
+                  where m.project_id = p_project_id and m.user_id = auth.uid()) then
+    raise exception 'You do not have access to this project' using errcode = '42501';
+  end if;
   perform set_config('pg_trgm.similarity_threshold', p_threshold::text, true);
+  -- Note: the other side of each join reads study_references directly (not a
+  -- CTE) so that the DOI / PMID / title b-tree indexes and the trigram GIN
+  -- index are used. A CTE referenced several times is materialised without
+  -- indexes, which turned the fuzzy join into a full cross product.
   return query
-  with src as (
-    select * from public.study_references
-     where project_id = p_project_id and id = any(p_reference_ids)
-       and duplicate_status not in ('duplicate', 'merged')
-  ), others as (
-    select * from public.study_references
-     where project_id = p_project_id and duplicate_status not in ('duplicate', 'merged')
+  with src as materialized (
+    select r.id, r.doi_norm, r.pmid, r.title_norm, r.year from public.study_references r
+     where r.project_id = p_project_id and r.id = any(p_reference_ids)
+       and r.duplicate_status not in ('duplicate', 'merged')
   ), pairs as (
     select s.id a, o.id b, 'doi'::text mt, 1.0::real sc
-      from src s join others o on o.doi_norm = s.doi_norm and o.id <> s.id
+      from src s join public.study_references o
+        on o.project_id = p_project_id and o.doi_norm = s.doi_norm and o.id <> s.id
+       and o.duplicate_status not in ('duplicate', 'merged')
      where s.doi_norm is not null
     union all
     select s.id, o.id, 'pmid', 1.0::real
-      from src s join others o on o.pmid = s.pmid and o.id <> s.id
+      from src s join public.study_references o
+        on o.project_id = p_project_id and o.pmid = s.pmid and o.id <> s.id
+       and o.duplicate_status not in ('duplicate', 'merged')
      where s.pmid is not null and s.pmid <> ''
     union all
     select s.id, o.id, 'title_year', 1.0::real
-      from src s join others o on o.title_norm = s.title_norm and o.id <> s.id
+      from src s join public.study_references o
+        on o.project_id = p_project_id and o.title_norm = s.title_norm and o.id <> s.id
+       and o.duplicate_status not in ('duplicate', 'merged')
        and (o.year is not distinct from s.year or o.year is null or s.year is null)
      where s.title_norm is not null and length(s.title_norm) >= 10
     union all
     select s.id, o.id, 'fuzzy_title', similarity(s.title_norm, o.title_norm)
-      from src s join others o on o.title_norm % s.title_norm and o.id <> s.id
+      from src s join public.study_references o
+        on o.title_norm % s.title_norm and o.project_id = p_project_id and o.id <> s.id
+       and o.duplicate_status not in ('duplicate', 'merged')
        and o.title_norm <> s.title_norm
        and (o.year is not distinct from s.year or o.year is null or s.year is null
             or abs(o.year - s.year) <= 1)

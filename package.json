@@ -3,13 +3,17 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "ScreenLab — Systematic Review Screening, Simplified.",
+  "description": "ScreenLab \u2014 Systematic Review Screening, Simplified.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "test:e2e": "node tests/e2e/browser.e2e.mjs",
+    "stack": "tests/e2e/localstack/stack.sh",
+    "generate:testdata": "node scripts/generate-test-data.mjs 5000 tests/fixtures/large-5000.csv"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",
@@ -23,9 +27,11 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.2",
     "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "pg": "^8.23.0",
     "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
