@@ -1,0 +1,27 @@
+PMID- 90000011
+OWN - NLM
+TI  - A fictional MEDLINE record used for testing the importer: title is
+      wrapped over two lines.
+AB  - Background: this abstract is invented. It is also wrapped
+      across lines to test continuation.
+FAU - Example, Alice
+AU  - Example A
+FAU - Sample, Bob
+AU  - Sample B
+DP  - 2023 Jan 5
+JT  - Journal of Imaginary Medicine
+TA  - J Imag Med
+VI  - 12
+IP  - 3
+PG  - 45-52
+LA  - eng
+PT  - Journal Article
+PT  - Review
+LID - 10.5555/med.1 [doi]
+OT  - fiction
+
+PMID- 90000012
+TI  - Second fictional MEDLINE record.
+AU  - Nobody N
+DP  - 2020
+JT  - Journal of Imaginary Medicine
