@@ -24,7 +24,8 @@ export function HistoryPanel({ referenceId, version }: { referenceId: string; ve
               <time className="text-slate-500" dateTime={r.created_at}>{fmtDate(r.created_at)}</time>{' '}
               <span className="text-slate-500">{r.stage === 'full_text' ? '[full text]' : '[title/abstract]'}</span>{' '}
               {r.action === 'undo' && <strong>Undo: </strong>}
-              {r.previous_decision !== undefined && r.action !== 'decide' ? <>{label(r.previous_decision)} → </> : null}
+              {r.action === 'restore' && <strong>Carried over from import (e.g. Rayyan): </strong>}
+              {r.action === 'change' || r.action === 'undo' || r.action === 'clear' ? <>{label(r.previous_decision)} → </> : null}
               <strong>{label(r.decision)}</strong>
               {r.exclusion_reason && <> — {r.exclusion_reason}</>}
             </li>

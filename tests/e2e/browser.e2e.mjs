@@ -436,6 +436,34 @@ try {
   await cb.close();
   await ctxB.close();
 
+  // ---------------------------------------------------------------- Rayyan .zip
+  await page.goto(`${APP}/projects/new`);
+  await page.getByLabel('Review title').fill('Continued from Rayyan');
+  await page.getByRole('button', { name: 'Create review' }).click();
+  await page.getByRole('heading', { name: 'Continued from Rayyan' }).waitFor();
+  const rayId = page.url().split('/p/')[1];
+  await page.goto(`${APP}/p/${rayId}/import`);
+  await page.getByLabel('Reference file').setInputFiles(path.join(FX, 'rayyan-export.zip'));
+  await page.getByLabel(/Database source/).selectOption('Other');
+  await page.getByLabel('Custom source name').fill('Rayyan');
+  await page.getByRole('button', { name: 'Preview import' }).click();
+  await page.getByRole('heading', { name: 'Import preview' }).waitFor({ timeout: 30000 });
+  check('Rayyan .zip export accepted — reads articles.csv inside', await visible(page.getByText('articles.csv')));
+  const panel = page.getByTestId('rayyan-panel');
+  check('Preview shows Rayyan decisions found', /1 included.*1 excluded.*1 maybe/s.test(await panel.textContent()), (await panel.textContent()).slice(0, 160));
+  await shot(page, '23-rayyan-preview');
+  await page.getByRole('button', { name: /^Import 5 references$/ }).click();
+  await page.getByRole('heading', { name: '✓ Import complete' }).waitFor({ timeout: 60000 });
+  check('Rayyan decisions carried over (include / exclude + reasons / maybe)',
+    sql(`select string_agg(coalesce(title_abstract_decision,'-') || ':' || coalesce(title_abstract_exclusion_reason,'-'), ',' order by seq) from study_references where project_id='${rayId}'`)
+      === 'include:-,exclude:Wrong study design; Wrong population,maybe:-,-:-,-:-');
+  check('Rayyan labels became tags', sql(`select string_agg(name, ',' order by name) from tags where project_id='${rayId}'`) === 'Check Later,Hospital,ML');
+  await page.getByRole('button', { name: 'Start screening' }).click();
+  await page.locator('#article-title').waitFor();
+  check('Screening continues at the first record still unscreened', (await currentTitle(page)) === 'Fictional editorial D');
+  await page.locator('aside[aria-label="Screening controls"] details summary').click();
+  check('Conflict from Rayyan is explained in the notes', (await page.locator('aside[aria-label="Screening controls"] #notes').inputValue()).includes('Reviewers disagreed'));
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

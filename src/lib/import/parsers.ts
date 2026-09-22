@@ -1,7 +1,8 @@
 import Papa from 'papaparse';
 import type { BibField, BibRecord } from '../types';
 import { clean, cleanMultiline, parseYear } from '../normalize';
-import { bibTypeLabel, headerRank, isPageEnd, isPageStart, mapHeader, risTypeLabel } from './fieldMap';
+import { bibTypeLabel, headerRank, isPageEnd, isPageStart, mapHeader, normKey, risTypeLabel } from './fieldMap';
+import { parseRayyanNotes, type RayyanInfo } from './rayyan';
 
 export type ImportFormat = 'csv' | 'ris' | 'bibtex' | 'medline';
 
@@ -12,6 +13,8 @@ export interface ParsedRecord extends BibRecord {
   recordNo: number;
   /** Non-fatal problems (e.g. "year not recognised"). */
   warnings: string[];
+  /** Screening decisions / labels / notes exported by Rayyan, if present. */
+  rayyan: RayyanInfo | null;
 }
 
 export interface ParseIssue {
@@ -68,12 +71,31 @@ function push(c: Collected, f: BibField, v: string | null | undefined) {
   (c[f] ??= []).push(s);
 }
 
+const NOTE_KEYS = new Set(['notes', 'note', 'n1', 'annote', 'rayyannotes']);
+
+/** Rayyan writes its screening data into the notes field of every export format. */
+function rayyanFrom(original: Record<string, unknown>): RayyanInfo | null {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(original)) {
+    if (!NOTE_KEYS.has(normKey(k))) continue;
+    for (const x of Array.isArray(v) ? v : [v]) if (x != null) parts.push(String(x));
+  }
+  return parts.length ? parseRayyanNotes(parts.join(' | ')) : null;
+}
+
+/** "Doe, J. and Smith, A." (Rayyan / BibTeX style) or "Doe, J.; Smith, A." */
+function splitAuthors(v: string): string[] {
+  if (/;|\|/.test(v)) return v.split(/;\s*|\s*\|\s*/);
+  if (/,/.test(v) && /\s+and\s+/i.test(v)) return v.split(/\s+and\s+/i);
+  return [v];
+}
+
 function finalize(c: Collected, original: Record<string, unknown>, recordNo: number): ParsedRecord {
   const warnings: string[] = [];
   const first = (f: BibField) => (c[f] && c[f]!.length ? c[f]![0] : null);
   const joinAll = (f: BibField, sep: string) => (c[f] && c[f]!.length ? c[f]!.join(sep) : null);
 
-  const rec: ParsedRecord = { ...EMPTY, original, recordNo, warnings };
+  const rec: ParsedRecord = { ...EMPTY, original, recordNo, warnings, rayyan: rayyanFrom(original) };
   rec.title = clean(first('title'));
   rec.authors = clean(joinAll('authors', '; '));
   rec.abstract = cleanMultiline(c.abstract && c.abstract.length ? c.abstract.join('\n\n') : null);
@@ -164,7 +186,7 @@ export function parseCsv(text: string): ParseResult {
       const m = mapping.get(h);
       if (m === 'pageStart') c.pageStart = String(v).trim();
       else if (m === 'pageEnd') c.pageEnd = String(v).trim();
-      else if (m === 'authors') String(v).split(/;\s*|\s*\|\s*/).forEach((a) => push(c, 'authors', a));
+      else if (m === 'authors') splitAuthors(String(v)).forEach((a) => push(c, 'authors', a));
       else if (m) push(c, m, v);
     }
     const extra = (row as Record<string, unknown>)['__parsed_extra'];

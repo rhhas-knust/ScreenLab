@@ -39,7 +39,8 @@ each with its research question, inclusion/exclusion criteria, PICO/PECO fields,
 language.
 
 **Import** — CSV/TSV, RIS, BibTeX and PubMed (`.nbib`) files from PubMed, Scopus, Web of
-Science, Embase, CINAHL, IEEE Xplore, Google Scholar, Zotero, EndNote, Mendeley, etc.
+Science, Embase, CINAHL, IEEE Xplore, Google Scholar, Zotero, EndNote, Mendeley, etc., and
+**`.zip` exports** (the reference file inside is opened automatically).
 Common column/tag variants are recognised (`Title` / `Article Title` / `TI`, `Authors` / `AU`,
 `Year` / `Publication Year` / `PY`, `Journal` / `Source title` / `JO` / `T2`, `DOI` / `DO`, …).
 Files are read in a background worker (the page never freezes), and you always see a
@@ -204,6 +205,26 @@ the next article* in the decision panel if you prefer to stay on an article afte
 
 ---
 
+### Moving a review from Rayyan
+
+1. In Rayyan, export your review (CSV is best; RIS and BibTeX also work). Rayyan downloads a
+   `.zip` file — you do not need to unzip it.
+2. In ScreenLab create the review, then **Import references** and choose the `.zip`.
+   Pick “Other → Rayyan” (or the original database) as the source.
+3. The preview shows **“Rayyan screening data found”**: how many records you had included,
+   excluded or marked maybe, your labels and exclusion reasons. Leave **“Continue my Rayyan
+   screening”** ticked to carry them over:
+   - Include / Exclude / Maybe become title/abstract decisions (history entry: “carried over
+     from import”);
+   - Rayyan exclusion reasons are matched to your reason list (new ones are added);
+   - labels become tags, Rayyan notes become notes;
+   - if several Rayyan reviewers disagreed on a record, it is left **unscreened** and the
+     disagreement is written in its notes, so you can decide.
+4. *Continue screening* then opens the first record you had not screened yet.
+
+Rayyan has no separate full-text stage in its export, so carried-over decisions are placed in
+the title/abstract stage; records you included move on to full-text screening as usual.
+
 ## Exporting, backup and restore
 
 **Settings → Data export & backup** (also *Export* on the dashboard):
@@ -304,7 +325,8 @@ bar; next article after a decision ≈ 40 ms; search and filters < 0.6 s.
   imports, tags, duplicate resolution and exports need a connection.
 - Duplicate detection of very large projects (20 000+ new records at once) takes a few minutes;
   keep the tab open until it finishes. It can be re-run from the Duplicates page.
-- Excel `.xlsx` files are not read directly — save them as CSV first.
+- Excel `.xlsx` files are not read directly — save them as CSV first. Zip files are read, but
+  not other archives (`.rar`, `.7z`).
 - The statistics page provides PRISMA-style counts, not a finished PRISMA diagram.
 
 ## Roadmap

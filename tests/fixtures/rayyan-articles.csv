@@ -1,0 +1,6 @@
+key,title,authors,journal,issn,volume,issue,pages,year,publisher,url,abstract,notes,doi,keywords,pubmed_id
+rayyan-1,Fictional model A for pretend infections,"Doe, J. and Roe, R.",Journal of Examples (fictional),,1,2,1-9,2021,,,"Fictional abstract A.","RAYYAN-INCLUSION: {""Kofi""=>""Included""} | RAYYAN-LABELS: ML,Hospital",10.5555/rayyan.1,ml; demo,90000101
+rayyan-2,Fictional survey B of imaginary nurses,"Smith, A.",Journal of Examples (fictional),,1,2,10-19,2020,,,"Fictional abstract B.","RAYYAN-INCLUSION: {""Kofi""=>""Excluded""} | RAYYAN-EXCLUSION-REASONS: wrong study design,wrong population | USER-NOTES: {""Kofi""=>[""no model developed""]}",10.5555/rayyan.2,,
+rayyan-3,Fictional cohort C in a pretend ICU,"Lee, K.",Journal of Examples (fictional),,2,1,20-29,2022,,,"Fictional abstract C.","RAYYAN-INCLUSION: {""Kofi""=>""Maybe""} | RAYYAN-LABELS: Check Later",10.5555/rayyan.3,,
+rayyan-4,Fictional editorial D,"Opinion, O.",Journal of Examples (fictional),,2,1,30,2019,,,"Fictional abstract D.","RAYYAN-INCLUSION: {""Kofi""=>""Included"", ""Ama""=>""Excluded""} | RAYYAN-EXCLUSION-REASONS: wrong publication type",10.5555/rayyan.4,,
+rayyan-5,Fictional unscreened study E,"New, N.",Journal of Examples (fictional),,3,1,40-49,2024,,,"Fictional abstract E.",,10.5555/rayyan.5,,
