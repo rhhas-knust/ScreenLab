@@ -287,7 +287,7 @@ try {
   check('Statistics page renders derived counts', await page.getByText('Records identified from databases (imported)').isVisible());
   await page.goto(`${APP}/p/${projectId}/activity`);
   await page.getByRole('heading', { name: 'Activity log' }).waitFor();
-  check('Activity log lists screening + import events', (await page.getByText(/Screened as Excluded — Wrong population/).count()) > 0 && (await page.getByText(/Imported 4 references from sample.csv/).count()) > 0);
+  check('Activity log lists screening + import events', (await visible(page.getByText(/Screened as Excluded — Wrong population/))) && (await visible(page.getByText(/Imported 4 references from sample.csv/))));
 
   // ---------------------------------------------------------------- TEST 21–23
   await page.goto(`${APP}/p/${projectId}/settings#export`);
