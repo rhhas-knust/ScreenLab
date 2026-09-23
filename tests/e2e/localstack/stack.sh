@@ -18,7 +18,9 @@ start_pg() {
 reset_db() {
   $PSQL -c "drop database if exists screenlab with (force)" -c "create database screenlab"
   $PSQL -d screenlab -f "$DIR/bootstrap.sql"
-  $PSQL -d screenlab -f "$ROOT/supabase/migrations/20260922000001_screenlab_schema.sql" 2>&1 | grep -v NOTICE || true
+  for f in "$ROOT"/supabase/migrations/*.sql; do
+    $PSQL -d screenlab -f "$f" 2>&1 | grep -v NOTICE || true
+  done
   $PSQL -d screenlab -c "insert into auth.users(id,email,encrypted_password,email_confirmed_at,aud,role) values
     ('af75b6c9-225e-4f05-b03c-be08be841d4e','e2e-a@screenlab.test',crypt('E2e-test-password-1',gen_salt('bf')),now(),'authenticated','authenticated'),
     ('0901688c-4622-43dc-99c6-346e83e84957','e2e-b@screenlab.test',crypt('E2e-test-password-1',gen_salt('bf')),now(),'authenticated','authenticated')"

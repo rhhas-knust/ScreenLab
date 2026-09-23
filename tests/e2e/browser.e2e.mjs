@@ -344,6 +344,8 @@ try {
     sql(`select title_abstract_decision from study_references where id='${offRef}'`) === 'include');
 
   // Server outage (network reachable but API failing) → retry
+  await page.goto(`${APP}/p/${projectId}/screening?status=maybe`);
+  await page.locator('#article-title').waitFor();
   await fetch(`${STACK}/__control/offline?v=1`);
   const r5 = currentRef(page);
   await shot(page, '14b-before-outage-decision');
@@ -478,6 +480,75 @@ try {
   const viaId = page.url().split('/p/')[1].split('/')[0];
   check('…project created with Rayyan decisions and source "Rayyan"',
     sql(`select p.title || ':' || count(r.*) filter (where r.title_abstract_decision is not null) || ':' || min(r.database_source) from projects p join study_references r on r.project_id = p.id where p.id='${viaId}' group by p.title`) === 'My Rayyan review:3:Rayyan');
+
+  // ---------------------------------------------------------------- Criteria keywords + multi-select
+  await page.goto(`${APP}/projects/new`);
+  await page.getByLabel('Review title').fill('Bulk and keywords');
+  await page.getByLabel('Inclusion criteria').fill('• Studies of imaginary sensors\n• Widget therapy');
+  await page.getByLabel('Exclusion criteria').fill('Conference papers; synthetic data');
+  await page.getByRole('button', { name: 'Create review' }).click();
+  await page.getByRole('heading', { name: 'Bulk and keywords' }).waitFor();
+  const bkId = page.url().split('/p/')[1];
+  for (const [f, src] of [['sample.csv', 'Scopus'], ['sample.ris', 'Web of Science']]) {
+    await page.goto(`${APP}/p/${bkId}/import`);
+    await page.getByLabel('Reference file').setInputFiles(path.join(FX, f));
+    await page.getByLabel(/Database source/).selectOption(src);
+    await page.getByRole('button', { name: 'Preview import' }).click();
+    await page.getByRole('button', { name: /^Import \d+ references$/ }).click();
+    await page.getByRole('heading', { name: '✓ Import complete' }).waitFor({ timeout: 60000 });
+  }
+  await page.goto(`${APP}/p/${bkId}/settings#criteria`);
+  await page.getByRole('button', { name: 'Suggest from my inclusion criteria' }).click();
+  await page.getByRole('button', { name: 'Suggest from my exclusion criteria' }).click();
+  const sugInc = await page.getByLabel('✓ Inclusion keywords').inputValue();
+  const sugExc = await page.getByLabel('✕ Exclusion keywords').inputValue();
+  check('Keyword suggestions are drawn from the written criteria (editable)', /imaginary sensors/.test(sugInc) && /widget therapy/.test(sugInc) && /^conference$/m.test(sugExc) && /synthetic data/.test(sugExc), `${sugInc.replace(/\n/g, ', ')} | ${sugExc.replace(/\n/g, ', ')}`);
+  await page.getByLabel('✓ Inclusion keywords').fill('sensor*\nwidget therapy');
+  await page.getByLabel('✕ Exclusion keywords').fill('conference\nsynthetic data');
+  await page.getByRole('button', { name: 'Save keywords' }).click();
+  await page.getByText('Criteria keywords saved').waitFor();
+  await page.goto(`${APP}/p/${bkId}/screening?q=sensors`);
+  await page.locator('#article-title').waitFor();
+  check('Screening highlights inclusion keywords in the article', await visible(page.locator('#article-title mark[title^="Inclusion keyword"]')));
+  check('Keyword check panel lists matches (reading aid)', /Inclusion\s*sensor\*/.test(await page.getByTestId('keyword-check').textContent()));
+  await shot(page, '25-keywords-screening');
+
+  await page.goto(`${APP}/p/${bkId}/references?kw=exc_only`);
+  await page.getByText('1 references in this view').waitFor({ timeout: 10000 });
+  check('Filter: exclusion keywords but no inclusion keywords', (await page.locator('tbody tr').count()) === 1);
+  await page.goto(`${APP}/p/${bkId}/references`);
+  await page.locator('tbody tr').first().waitFor();
+  const boxes = page.locator('tbody input[type=checkbox]');
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  await page.getByTestId('bulk-bar').waitFor();
+  check('Bulk bar shows the selection count', /2 selected/.test(await page.getByTestId('bulk-bar').textContent()));
+  await page.getByTestId('bulk-exclude').click();
+  await page.getByLabel(/Exclusion reason/).selectOption('Wrong population');
+  await shot(page, '26-bulk-confirm');
+  await page.getByTestId('bulk-apply').click();
+  await page.getByText(/2 records → Excluded — Wrong population/).waitFor();
+  check('Bulk exclude with reason saved for each record (with audit rows)',
+    sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='exclude' and title_abstract_exclusion_reason='Wrong population'`) === '2'
+    && sql(`select count(*) from screening_decisions where project_id='${bkId}'`) === '2');
+  await page.getByRole('button', { name: 'Undo' }).last().click();
+  await page.getByText(/Undone — 2 records restored/).waitFor();
+  check('Bulk undo restores every record', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision is not null`) === '0');
+  await page.locator('thead input[type=checkbox]').check();
+  await page.getByTestId('bulk-include').click();
+  await page.getByTestId('bulk-apply').click();
+  await page.getByText(/7 records → Included/).waitFor();
+  check('Select page → bulk include', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='include'`) === '7');
+
+  await page.goto(`${APP}/p/${bkId}/screening?status=include`);
+  await page.locator('#article-title').waitFor();
+  await page.getByTestId('select-mode').click();
+  await page.locator('aside[aria-label="Article list"] ul input[type=checkbox]').first().check();
+  await page.getByTestId('bulk-maybe').click();
+  await page.getByTestId('bulk-apply').click();
+  await page.getByText(/1 record → Maybe/).waitFor();
+  check('Screening list: Select mode → bulk Maybe', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='maybe'`) === '1');
+  await shot(page, '27-screening-select');
 
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);

@@ -1,13 +1,15 @@
 import type { RefFilters, RefSort, SortKey } from '../lib/api/references';
-import { SORT_LABELS } from '../lib/api/references';
+import { KW_LABELS, SORT_LABELS } from '../lib/api/references';
 import type { Facets, Stage, Tag } from '../lib/types';
 import { Button, Input, Label, Select } from './ui';
 
 export function FiltersForm({
-  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f',
+  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false,
 }: {
   filters: RefFilters; setFilters: (f: Partial<RefFilters>) => void; clearFilters: () => void;
   facets: Facets | undefined; tags: Tag[] | undefined; stage: Stage; idPrefix?: string;
+  /** True when the project has criteria keywords. */
+  criteriaReady?: boolean;
 }) {
   const id = (s: string) => `${idPrefix}-${s}`;
   return (
@@ -22,6 +24,14 @@ export function FiltersForm({
           <option value="exclude">✕ Excluded</option>
           {stage === 'title_abstract' && <option value="maybe">? Maybe</option>}
         </Select>
+      </div>
+      <div>
+        <Label htmlFor={id('kw')}>Criteria keywords</Label>
+        <Select id={id('kw')} value={filters.kw} disabled={!criteriaReady && !filters.kw}
+          onChange={(e) => setFilters({ kw: e.target.value as RefFilters['kw'] })}>
+          {(Object.keys(KW_LABELS) as RefFilters['kw'][]).map((k) => <option key={k} value={k}>{KW_LABELS[k]}</option>)}
+        </Select>
+        {!criteriaReady && <p className="mt-1 text-xs text-slate-500">Add inclusion/exclusion keywords in Settings → Criteria keywords to use this filter.</p>}
       </div>
       <div>
         <Label htmlFor={id('source')}>Database</Label>

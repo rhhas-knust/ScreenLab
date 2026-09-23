@@ -74,6 +74,16 @@ asks for a quick confirmation. Decisions are shown with icons and words, never c
 - Editable exclusion-reason list, custom reasons, notes (auto-saved), tags, full-text status,
   full-text link, PDF upload (private storage)
 - Filtering by status (e.g. *Maybe*) switches to **review mode**, which steps through that list
+- **Multi-select:** tick records on the *References* page (or use *☑ Select* in the screening
+  list), or select *all records matching the current view*, then **Include / Exclude (with a
+  reason) / Maybe / Reset** them in one go. You confirm first, every record still gets its own
+  audit-history entry, and the whole batch can be undone.
+- **Criteria keywords** (*Settings → Criteria keywords*): list inclusion and exclusion terms —
+  ScreenLab can suggest them from your written criteria for you to edit. Matches are
+  highlighted in titles and abstracts (green = inclusion, red wavy = exclusion), summarised next
+  to the decision buttons, counted per row on the References page, and usable as a **filter**
+  (“has inclusion keywords”, “exclusion keywords but no inclusion keywords”, …). They are a
+  reading and filtering aid only — they never make a decision.
 - Server-side search (title, abstract, authors, journal, DOI, PMID, keywords, notes, tags),
   filters (status, database, year range, publication type, language, tags, duplicate status,
   full-text status, exclusion reason) and sorting — fast with 20 000+ records
@@ -107,7 +117,7 @@ the URL.
 
 There is no custom server: the browser talks directly to Supabase, and the database enforces
 who may see what. The whole database design is in
-[`supabase/migrations/20260922000001_screenlab_schema.sql`](supabase/migrations/20260922000001_screenlab_schema.sql).
+[`supabase/migrations/`](supabase/migrations/) — run the files in date order.
 
 Main tables: `projects`, `project_members`, `project_settings`, `study_references`
 (“references” is a reserved SQL word), `screening_decisions` (append-only history),
@@ -132,8 +142,9 @@ migration applied, and Vercel deploys the app. The steps below are what you need
 ### 2. Configure the database *(done — only needed for a new project)*
 
 1. In Supabase open **SQL Editor → New query**.
-2. Paste the entire contents of `supabase/migrations/20260922000001_screenlab_schema.sql` and
-   press **Run**. This creates all tables, security rules, functions and the private
+2. Paste the entire contents of each file in `supabase/migrations/`, **in date order**
+   (`20260922000001_screenlab_schema.sql`, then `20260923000001_bulk_decisions.sql`, …), and
+   press **Run** for each. This creates all tables, security rules, functions and the private
    `full-texts` storage bucket. It is safe to run again.
 
 ### 3. Configure authentication *(please do this once)*

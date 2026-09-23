@@ -12,9 +12,10 @@ import { ExportPanel } from '../components/ExportPanel';
 import { TagChip } from '../components/Decision';
 import { useToast } from '../components/Toast';
 import { AccountSection } from './AccountPage';
+import { CriteriaKeywordsEditor } from '../components/CriteriaKeywords';
 
 const SECTIONS = [
-  ['account', 'Account'], ['project', 'Project settings'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
+  ['account', 'Account'], ['project', 'Project settings'], ['criteria', 'Criteria keywords'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
   ['reasons', 'Exclusion reasons'], ['tags', 'Tags'], ['export', 'Data export & backup'], ['delete', 'Delete project'], ['about', 'About ScreenLab'],
 ] as const;
 
@@ -181,6 +182,7 @@ export function SettingsPage() {
             }
           }} />
         </Section>
+        <Section id="criteria" title="Criteria keywords"><CriteriaKeywordsEditor project={project} settings={settings} /></Section>
         <Section id="screening" title="Screening settings">
           <div className="space-y-3 text-sm">
             <label className="flex items-start gap-2">

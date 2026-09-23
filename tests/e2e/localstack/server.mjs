@@ -196,6 +196,8 @@ function cond(col, expr, params) {
     case 'lte': sql = `${c} <= ${add(unquote(raw))}`; break;
     case 'like': sql = `${c}::text like ${add(unquote(raw).replace(/\*/g, '%'))}`; break;
     case 'ilike': sql = `${c}::text ilike ${add(unquote(raw).replace(/\*/g, '%'))}`; break;
+    case 'match': sql = `${c}::text ~ ${add(unquote(raw))}`; break;
+    case 'imatch': sql = `${c}::text ~* ${add(unquote(raw))}`; break;
     case 'is': sql = raw === 'null' ? `${c} is null` : raw === 'true' ? `${c} is true` : raw === 'false' ? `${c} is false` : `${c} is not null`; break;
     case 'in': {
       const list = splitTop(raw.replace(/^\(|\)$/g, '')).map(unquote);

@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { termsFromSettings, type CriteriaTerms } from './criteria';
 import { getFacets, getProject, getSettings, getStats, listProjectsOverview } from './api/projects';
 import { listReasons, listTags } from './api/tags';
 
@@ -38,4 +40,10 @@ export function fmtDate(s: string | null | undefined, withTime = true): string {
   return withTime
     ? d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** The project's criteria keywords (a highlighting / filtering aid). */
+export function useCriteriaTerms(id: string): CriteriaTerms {
+  const { data } = useSettings(id);
+  return useMemo(() => termsFromSettings(data?.settings), [data?.settings]);
 }

@@ -1,6 +1,7 @@
 import { supabase } from '../supabase';
 import { must } from '../errors';
-import type { Reference, ReferenceListItem, Stage } from '../types';
+import type { Decision, Reference, ReferenceListItem, Stage } from '../types';
+import type { CriteriaTerms } from '../criteria';
 
 export type StatusFilter = 'all' | 'unscreened' | 'screened' | 'include' | 'exclude' | 'maybe';
 export type DupFilter = 'active' | 'all' | 'none' | 'possible' | 'duplicate' | 'kept' | 'merged';
@@ -18,7 +19,19 @@ export interface RefFilters {
   dup: DupFilter;
   ftStatus: '' | 'not_available' | 'available' | 'reviewed';
   reason: string;
+  /** Criteria-keyword filter: has inclusion terms / has exclusion terms / exclusion but no inclusion / no inclusion terms. */
+  kw: '' | 'inc' | 'exc' | 'exc_only' | 'no_inc';
+  /** The project's criteria keywords (not stored in the URL; supplied by the page). */
+  terms?: CriteriaTerms;
 }
+
+export const KW_LABELS: Record<RefFilters['kw'], string> = {
+  '': 'Any',
+  inc: 'Has inclusion keywords',
+  exc: 'Has exclusion keywords',
+  exc_only: 'Exclusion keywords but no inclusion keywords',
+  no_inc: 'No inclusion keywords',
+};
 
 export interface RefSort {
   key: SortKey;
@@ -27,7 +40,7 @@ export interface RefSort {
 
 export const DEFAULT_FILTERS: RefFilters = {
   q: '', status: 'all', source: '', yearFrom: '', yearTo: '', pubType: '', language: '', tags: [],
-  dup: 'active', ftStatus: '', reason: '',
+  dup: 'active', ftStatus: '', reason: '', kw: '',
 };
 export const DEFAULT_SORT: RefSort = { key: 'seq', dir: 'asc' };
 
@@ -103,7 +116,38 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.tags.length) qb = qb.contains('tag_names', f.tags);
   if (f.ftStatus) qb = qb.eq('full_text_status', f.ftStatus);
   if (f.reason) qb = qb.eq(reasonColumn(stage), f.reason);
+  if (f.kw && f.terms) qb = applyKeywordFilter(qb, f.kw, f.terms);
   return qb;
+}
+
+/**
+ * PostgreSQL regular expression for a criteria term: whole words (\m … \M),
+ * phrases match across spaces or hyphens, a trailing * matches any ending.
+ * Mirrors termPattern() used for highlighting.
+ */
+export function termRegexPg(term: string): string {
+  const wild = term.endsWith('*');
+  const body = (wild ? term.slice(0, -1) : term)
+    .replace(/[\\.^$|?*+()[\]{}]/g, '\\$&')
+    .trim()
+    .replace(/\s+/g, '[[:space:]-]+');
+  return `\\m${body}${wild ? '' : '\\M'}`;
+}
+
+/** Server-side keyword filter on the searchable text (title, abstract, authors, keywords, notes, tags). */
+function applyKeywordFilter(qb: Query, kw: RefFilters['kw'], terms: CriteriaTerms): Query {
+  const anyOf = (list: string[]) => list.map((t) => `search_text.imatch.${q(termRegexPg(t))}`).join(',');
+  const noneOf = (b: Query, list: string[]) => list.reduce((x, t) => x.not('search_text', 'imatch', termRegexPg(t)), b);
+  const nothing = (b: Query) => b.eq('id', '00000000-0000-0000-0000-000000000000');
+  const inc = terms.include;
+  const exc = terms.exclude;
+  switch (kw) {
+    case 'inc': return inc.length ? qb.or(anyOf(inc)) : nothing(qb);
+    case 'exc': return exc.length ? qb.or(anyOf(exc)) : nothing(qb);
+    case 'exc_only': return exc.length ? noneOf(qb.or(anyOf(exc)), inc) : nothing(qb);
+    case 'no_inc': return noneOf(qb, inc);
+    default: return qb;
+  }
 }
 
 function applyOrder(qb: Query, stage: Stage, sort: RefSort, reverse = false): Query {
@@ -141,9 +185,9 @@ export interface ListPage {
 }
 
 export async function listReferences(
-  projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, page: number, pageSize: number,
+  projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, page: number, pageSize: number, extraColumns = '',
 ): Promise<ListPage> {
-  let qb = supabase.from('study_references').select(LIST_COLUMNS, { count: 'exact' });
+  let qb = supabase.from('study_references').select(LIST_COLUMNS + extraColumns, { count: 'exact' });
   qb = applyFilters(qb, projectId, stage, filters);
   qb = applyOrder(qb, stage, sort);
   const from = page * pageSize;
@@ -234,4 +278,46 @@ export async function fetchAllReferences(projectId: string, onProgress?: (n: num
     if (rows.length < size) break;
   }
   return out;
+}
+
+/** IDs (with current decision) of every reference matching the view — for "select all matching". */
+export async function fetchMatchingIds(
+  projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, onProgress?: (n: number) => void,
+): Promise<{ id: string; decision: Decision | null; title: string | null }[]> {
+  const col = decisionColumn(stage);
+  const out: { id: string; decision: Decision | null; title: string | null }[] = [];
+  for (let from = 0; ; from += 1000) {
+    let qb = supabase.from('study_references').select(`id,title,${col}`);
+    qb = applyFilters(qb, projectId, stage, filters);
+    qb = applyOrder(qb, stage, sort);
+    const rows = must(await qb.range(from, from + 999)) as Record<string, unknown>[];
+    for (const r of rows) out.push({ id: r.id as string, decision: (r[col] as Decision | null) ?? null, title: (r.title as string | null) ?? null });
+    onProgress?.(out.length);
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+
+export interface BulkItem {
+  id: string;
+  decision: Decision | null;
+  reason: string | null;
+}
+
+/**
+ * Apply decisions to many references (each one is recorded individually in
+ * the audit history). Returns every record's previous decision for undo.
+ */
+export async function recordDecisionsBulk(
+  stage: Stage, items: BulkItem[], action: 'decide' | 'undo' = 'decide', onProgress?: (done: number, total: number) => void,
+): Promise<BulkItem[]> {
+  const previous: BulkItem[] = [];
+  const size = 200;
+  for (let i = 0; i < items.length; i += size) {
+    const chunk = items.slice(i, i + size);
+    const prev = must(await supabase.rpc('record_decisions_bulk', { p_stage: stage, p_items: chunk, p_action: action })) as BulkItem[];
+    previous.push(...(prev ?? []));
+    onProgress?.(Math.min(i + size, items.length), items.length);
+  }
+  return previous;
 }

@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchQueue, getReference, listReferences, neighbor, setDuplicateStatus, type ListPage,
+  fetchMatchingIds, fetchQueue, getReference, listReferences, neighbor, setDuplicateStatus, type ListPage,
 } from '../lib/api/references';
 import { createReason } from '../lib/api/tags';
 import { updateSettings } from '../lib/api/projects';
 import { friendlyError } from '../lib/errors';
-import { fmt, pct, qk, useFacets, useProject, useReasons, useSettings, useStats, useTags } from '../lib/hooks';
+import { fmt, pct, qk, useCriteriaTerms, useFacets, useProject, useReasons, useSettings, useStats, useTags } from '../lib/hooks';
+import { hasTerms } from '../lib/criteria';
+import { useSelection } from '../lib/useSelection';
+import { BulkDecisionBar } from '../components/BulkDecision';
+import { KeywordCheck } from '../components/CriteriaKeywords';
 import { outbox } from '../lib/outbox';
 import { useFilterParams } from '../lib/useFilterParams';
 import { useMediaQuery } from '../lib/useMediaQuery';
@@ -68,7 +72,10 @@ export function ScreeningPage() {
   const { data: reasons = [] } = useReasons(projectId);
   const { data: tags = [] } = useTags(projectId);
   const { data: facets } = useFacets(projectId);
-  const { filters, sort, stage: stageParam, refId, update, setFilters, clearFilters, setSort, activeFilterCount } = useFilterParams();
+  const { filters: urlFilters, sort, stage: stageParam, refId, update, setFilters, clearFilters, setSort, activeFilterCount } = useFilterParams();
+  const criteria = useCriteriaTerms(projectId);
+  // The criteria keywords feed the keyword filter; they are not stored in the URL.
+  const filters = useMemo(() => ({ ...urlFilters, terms: criteria }), [urlFilters, criteria]);
   const stage: Stage = settings && !settings.stage2_enabled ? 'title_abstract' : stageParam;
   // Each panel is rendered exactly once: in the side columns on wide screens,
   // in the drawer / below the article / bottom bar on narrow ones.
@@ -107,6 +114,8 @@ export function ScreeningPage() {
 
   const shortcutsEnabled = settings?.keyboard_shortcuts_enabled ?? true;
   const filterKey = JSON.stringify([stage, filters, sort]);
+  const [selectMode, setSelectMode] = useState(false);
+  const sel = useSelection(filterKey);
   const terms = useMemo(() => filters.q.toLowerCase().split(/\s+/).filter((t) => t.length > 1), [filters.q]);
   const applicableReasons = useMemo(() => reasons.filter((r) => r.is_active && (r.stage === 'both' || r.stage === stage)), [reasons, stage]);
 
@@ -219,6 +228,10 @@ export function ScreeningPage() {
         setAllDone(true);
         update({ ref: null });
       }
+      return;
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      toast('You are offline — your decision is saved on this device. Open the next article when the connection is back.');
       return;
     }
     setLoading(true);
@@ -342,8 +355,9 @@ export function ScreeningPage() {
     toast(`${prevD ? `Changed to ${decisionText(decision, newReason)}` : decisionText(decision, newReason)}`, {
       action: { label: 'Undo', onClick: () => undoRef.current() },
     });
+    // Show the new decision immediately; advancing replaces it when the next article is ready.
+    setCurrent(updated);
     if (autoAdvance) void advance(cur);
-    else setCurrent(updated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, stage, projectId, autoAdvance, advance, patchListCache, toast]);
 
@@ -385,6 +399,20 @@ export function ScreeningPage() {
     }
   }, [current, projectId, stage, filters, sort, show, goNextUnscreened, toast]);
 
+  const afterBulk = useCallback(() => {
+    sel.clear();
+    queueRef.current = [];
+    decidedRef.current.clear();
+    recentRef.current.clear();
+    qc.invalidateQueries({ queryKey: qk.refs(projectId) });
+    qc.invalidateQueries({ queryKey: qk.stats(projectId) });
+    qc.invalidateQueries({ queryKey: qk.activity(projectId) });
+    qc.invalidateQueries({ queryKey: qk.projects });
+    setHistoryVersion((v) => v + 1);
+    if (current) void openById(current.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, openById, projectId, qc]);
+
   const addReason = useCallback(async (label: string) => {
     await createReason(projectId, label, (reasons.at(-1)?.sort_order ?? 0) + 1);
     await qc.invalidateQueries({ queryKey: qk.reasons(projectId) });
@@ -421,7 +449,9 @@ export function ScreeningPage() {
   keyHandler.current = (e: KeyboardEvent) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = e.target as HTMLElement | null;
-    const typing = !!target?.closest('input, textarea, select, [contenteditable="true"]');
+    // Text fields swallow shortcuts; checkboxes / radios (e.g. list selection) do not.
+    const typing = !!target && (target.matches('textarea, select, [contenteditable="true"]')
+      || (target.matches('input') && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type)));
     if (e.key === 'Escape') {
       if (reasonOpen) setReasonOpen(false);
       else if (pendingChange) setPendingChange(null);
@@ -516,14 +546,42 @@ export function ScreeningPage() {
         </div>
         {filtersOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" />
+            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" criteriaReady={hasTerms(criteria)} />
           </div>
         )}
         <div className="text-xs text-slate-600">
           <div className="flex justify-between tabular-nums"><span><strong>{fmt(done)}</strong> / {fmt(total)} screened</span><span>{pct(done, total)}</span></div>
           <div className="mt-1"><ProgressBar value={done} max={total} label="Screening progress" /></div>
-          <div className="mt-1">{listQuery.data ? `${fmt(listQuery.data.count)} match${listQuery.data.count === 1 ? 'es' : ''} current view` : ' '}</div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span>{listQuery.data ? `${fmt(listQuery.data.count)} match${listQuery.data.count === 1 ? 'es' : ''} current view` : ' '}</span>
+            <Button size="sm" variant={selectMode ? 'subtle' : 'ghost'} aria-pressed={selectMode} data-testid="select-mode"
+              onClick={() => { setSelectMode((x) => !x); sel.clear(); }}>
+              {selectMode ? 'Done selecting' : '☑ Select'}
+            </Button>
+          </div>
         </div>
+        {selectMode && listQuery.data && listQuery.data.rows.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex items-center gap-1">
+                <input type="checkbox" aria-label="Select all on this page"
+                  checked={listQuery.data.rows.every((r) => sel.has(r.id))}
+                  onChange={(e) => sel.setMany(listQuery.data!.rows.map((r) => ({ id: r.id, decision: decisionOf(outbox.overlay(r as Reference), stage) })), e.target.checked)} />
+                Select page
+              </label>
+              {listQuery.data.count > listQuery.data.rows.length && !sel.allMatching && (
+                <button type="button" className="text-ink-800 underline" onClick={sel.selectAllMatching}>Select all {fmt(listQuery.data.count)} matching</button>
+              )}
+            </div>
+            {sel.active && (
+              <BulkDecisionBar compact projectId={projectId} stage={stage} count={sel.count(listQuery.data.count)} reasons={reasons}
+                getItems={async () => sel.allMatching
+                  ? (await fetchMatchingIds(projectId, stage, filters, sort)).map((r) => ({ id: r.id, decision: r.decision }))
+                  : [...sel.picked].map(([id, decision]) => ({ id, decision }))}
+                onDone={afterBulk} onClear={sel.clear} />
+            )}
+          </div>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto" aria-busy={listQuery.isFetching}>
         {listQuery.error ? (
@@ -539,7 +597,11 @@ export function ScreeningPage() {
               const d = decisionOf(o, stage);
               const active = current?.id === row.id;
               return (
-                <li key={row.id}>
+                <li key={row.id} className={cx(selectMode && 'flex items-start')}>
+                  {selectMode && (
+                    <input type="checkbox" className="mt-3 ml-3 h-4 w-4 shrink-0" aria-label={`Select: ${row.title ?? 'untitled'}`}
+                      checked={sel.has(row.id)} onChange={() => sel.toggle(row.id, d)} />
+                  )}
                   <button type="button" onClick={() => { setListOpen(false); void openById(row.id); }}
                     aria-current={active ? 'true' : undefined}
                     className={cx('flex w-full gap-2 border-b border-slate-100 px-3 py-2 text-left hover:bg-ink-50', active && 'bg-ink-100 hover:bg-ink-100')}>
@@ -579,6 +641,7 @@ export function ScreeningPage() {
 
   const detailPanels = current && (
     <div className="space-y-5">
+      <KeywordCheck reference={current} terms={criteria} projectId={projectId} />
       <NotesEditor reference={current} projectId={projectId} onLocalChange={(notes) => applyLocal({ notes })} />
       <TagEditor reference={current} tags={tags} projectId={projectId} onChange={(tag_names) => applyLocal({ tag_names })} />
       <FullTextPanel reference={current} projectId={projectId} onLocalChange={applyLocal} />
@@ -665,7 +728,7 @@ export function ScreeningPage() {
                 <p className="text-sm">Current decision: <DecisionBadge decision={curDecision} reason={curReason} /></p>
               </div>
             )}
-            <ArticleView reference={current} stage={stage} terms={terms} />
+            <ArticleView reference={current} stage={stage} terms={terms} criteria={criteria} />
             {!isLg && <div className="mx-auto max-w-3xl border-t border-slate-200 px-4 py-5 sm:px-6">{detailPanels}</div>}
             {!isLg && <div className="h-44" aria-hidden="true" />}
           </div>
@@ -717,7 +780,7 @@ export function ScreeningPage() {
       )}
 
       <Modal open={criteriaOpen} onClose={() => setCriteriaOpen(false)} title="Review criteria" size="lg">
-        <CriteriaView project={project} />
+        <CriteriaView project={project} terms={criteria} />
       </Modal>
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} enabled={shortcutsEnabled} onToggle={toggleShortcuts} />
     </div>

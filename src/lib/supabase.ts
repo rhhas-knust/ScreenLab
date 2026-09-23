@@ -12,6 +12,10 @@ export const supabase = createClient(url ?? 'http://invalid.localhost', anonKey 
     autoRefreshToken: true,
     detectSessionInUrl: true,
   },
+  // No hidden automatic retries (up to ~7 s when offline): ScreenLab retries
+  // itself — the save queue for writes and React Query for reads — and shows
+  // the user an honest connection status straight away.
+  db: { retry: false },
 });
 
 export const PDF_BUCKET = 'full-texts';

@@ -1,18 +1,9 @@
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { Highlight } from '../components/Highlight';
+import type { CriteriaTerms } from '../lib/criteria';
 import type { Reference, Stage } from '../lib/types';
 import { doiUrl, isValidDoi, pubmedUrl } from '../lib/normalize';
 import { DecisionBadge, TagChip } from '../components/Decision';
-
-function Highlight({ text, terms }: { text: string; terms: string[] }) {
-  if (!terms.length) return <>{text}</>;
-  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
-  const parts = text.split(re);
-  return (
-    <>
-      {parts.map((p, i) => (i % 2 === 1 ? <mark key={i} className="rounded bg-yellow-200 px-0.5 text-inherit">{p}</mark> : <Fragment key={i}>{p}</Fragment>))}
-    </>
-  );
-}
 
 function Meta({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -29,7 +20,7 @@ const DUP_TEXT: Record<string, string> = {
   merged: '⧉ Merged into another record (removed from screening)',
 };
 
-export function ArticleView({ reference: r, stage, terms }: { reference: Reference; stage: Stage; terms: string[] }) {
+export function ArticleView({ reference: r, stage, terms, criteria }: { reference: Reference; stage: Stage; terms: string[]; criteria?: CriteriaTerms }) {
   const doiLink = isValidDoi(r.doi) ? doiUrl(r.doi) : null;
   const pmLink = pubmedUrl(r.pmid);
   const citation = [r.journal, r.year, r.volume && `${r.volume}${r.issue ? `(${r.issue})` : ''}`, r.pages].filter(Boolean).join(' · ');
@@ -49,16 +40,16 @@ export function ArticleView({ reference: r, stage, terms }: { reference: Referen
         <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-amber-950">{DUP_TEXT[r.duplicate_status]}</p>
       )}
       <h1 id="article-title" className="font-serif text-xl leading-snug font-semibold text-ink-950 sm:text-2xl">
-        {r.title ? <Highlight text={r.title} terms={terms} /> : <em className="text-rose-700">[No title]</em>}
+        {r.title ? <Highlight text={r.title} search={terms} terms={criteria} /> : <em className="text-rose-700">[No title]</em>}
       </h1>
-      {r.authors && <p className="mt-2 text-sm text-slate-700"><Highlight text={r.authors} terms={terms} /></p>}
+      {r.authors && <p className="mt-2 text-sm text-slate-700"><Highlight text={r.authors} search={terms} /></p>}
       {citation && <p className="mt-1 text-sm text-slate-600 italic">{citation}</p>}
 
       <section className="mt-5" aria-labelledby="abstract-h">
         <h2 id="abstract-h" className="mb-1 text-xs font-bold tracking-wide text-slate-500 uppercase">Abstract</h2>
         {r.abstract ? (
           <div className="abstract-text max-w-[75ch] text-[15px] leading-relaxed text-slate-900">
-            {r.abstract.split(/\n{2,}/).map((p, i) => <p key={i}><Highlight text={p} terms={terms} /></p>)}
+            {r.abstract.split(/\n{2,}/).map((p, i) => <p key={i}><Highlight text={p} search={terms} terms={criteria} /></p>)}
           </div>
         ) : (
           <p className="text-sm text-slate-500 italic">No abstract available for this record.</p>
@@ -66,7 +57,7 @@ export function ArticleView({ reference: r, stage, terms }: { reference: Referen
       </section>
 
       <dl className="mt-6 border-t border-slate-200 pt-3">
-        {r.keywords && <Meta label="Keywords"><Highlight text={r.keywords} terms={terms} /></Meta>}
+        {r.keywords && <Meta label="Keywords"><Highlight text={r.keywords} search={terms} terms={criteria} /></Meta>}
         {r.journal && <Meta label="Journal">{r.journal}</Meta>}
         {r.year && <Meta label="Year">{r.year}</Meta>}
         <Meta label="DOI">
