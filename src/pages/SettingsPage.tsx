@@ -13,9 +13,10 @@ import { TagChip } from '../components/Decision';
 import { useToast } from '../components/Toast';
 import { AccountSection } from './AccountPage';
 import { CriteriaKeywordsEditor } from '../components/CriteriaKeywords';
+import { PicoKeywordsEditor } from '../components/Pico';
 
 const SECTIONS = [
-  ['account', 'Account'], ['project', 'Project settings'], ['criteria', 'Criteria keywords'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
+  ['account', 'Account'], ['project', 'Project settings'], ['pico', 'PICO keywords'], ['criteria', 'Criteria keywords'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
   ['reasons', 'Exclusion reasons'], ['tags', 'Tags'], ['export', 'Data export & backup'], ['delete', 'Delete project'], ['about', 'About ScreenLab'],
 ] as const;
 
@@ -182,6 +183,7 @@ export function SettingsPage() {
             }
           }} />
         </Section>
+        <Section id="pico" title="PICO keywords"><PicoKeywordsEditor project={project} settings={settings} /></Section>
         <Section id="criteria" title="Criteria keywords"><CriteriaKeywordsEditor project={project} settings={settings} /></Section>
         <Section id="screening" title="Screening settings">
           <div className="space-y-3 text-sm">

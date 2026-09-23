@@ -1,7 +1,7 @@
 import { supabase } from '../supabase';
 import { must } from '../errors';
 import type { Decision, Reference, ReferenceListItem, Stage } from '../types';
-import type { CriteriaTerms } from '../criteria';
+import { PICO_KEYS, PICO_LABELS, activePico, type CriteriaTerms, type PicoKey } from '../criteria';
 
 export type StatusFilter = 'all' | 'unscreened' | 'screened' | 'include' | 'exclude' | 'maybe';
 export type DupFilter = 'active' | 'all' | 'none' | 'possible' | 'duplicate' | 'kept' | 'merged';
@@ -21,9 +21,21 @@ export interface RefFilters {
   reason: string;
   /** Criteria-keyword filter: has inclusion terms / has exclusion terms / exclusion but no inclusion / no inclusion terms. */
   kw: '' | 'inc' | 'exc' | 'exc_only' | 'no_inc';
+  /** PICO filter: all elements found / at least one missing / none found / a specific element missing. */
+  pico: PicoFilter;
   /** The project's criteria keywords (not stored in the URL; supplied by the page). */
   terms?: CriteriaTerms;
 }
+
+export type PicoFilter = '' | 'all' | 'miss_any' | 'none' | `miss_${PicoKey}`;
+
+export const PICO_FILTER_LABELS: Record<PicoFilter, string> = {
+  '': 'Any',
+  all: 'All PICO elements found',
+  miss_any: 'At least one element missing',
+  none: 'No PICO keywords found',
+  ...Object.fromEntries(PICO_KEYS.map((k) => [`miss_${k}`, `${PICO_LABELS[k]} missing`])),
+} as Record<PicoFilter, string>;
 
 export const KW_LABELS: Record<RefFilters['kw'], string> = {
   '': 'Any',
@@ -40,7 +52,7 @@ export interface RefSort {
 
 export const DEFAULT_FILTERS: RefFilters = {
   q: '', status: 'all', source: '', yearFrom: '', yearTo: '', pubType: '', language: '', tags: [],
-  dup: 'active', ftStatus: '', reason: '', kw: '',
+  dup: 'active', ftStatus: '', reason: '', kw: '', pico: '',
 };
 export const DEFAULT_SORT: RefSort = { key: 'seq', dir: 'asc' };
 
@@ -117,6 +129,7 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.ftStatus) qb = qb.eq('full_text_status', f.ftStatus);
   if (f.reason) qb = qb.eq(reasonColumn(stage), f.reason);
   if (f.kw && f.terms) qb = applyKeywordFilter(qb, f.kw, f.terms);
+  if (f.pico && f.terms) qb = applyPicoFilter(qb, f.pico, f.terms);
   return qb;
 }
 
@@ -147,6 +160,26 @@ function applyKeywordFilter(qb: Query, kw: RefFilters['kw'], terms: CriteriaTerm
     case 'exc_only': return exc.length ? noneOf(qb.or(anyOf(exc)), inc) : nothing(qb);
     case 'no_inc': return noneOf(qb, inc);
     default: return qb;
+  }
+}
+
+const matchAny = (list: string[]) => list.map((t) => `search_text.imatch.${q(termRegexPg(t))}`).join(',');
+const matchNone = (list: string[]) => list.map((t) => `search_text.not.imatch.${q(termRegexPg(t))}`).join(',');
+
+/** Server-side PICO filter. Elements without keywords are ignored. */
+function applyPicoFilter(qb: Query, pico: PicoFilter, terms: CriteriaTerms): Query {
+  const keys = activePico(terms);
+  const of = (k: PicoKey) => terms.pico?.[k] ?? [];
+  const nothing = (b: Query) => b.eq('id', '00000000-0000-0000-0000-000000000000');
+  if (!keys.length) return nothing(qb);
+  switch (pico) {
+    case 'all': return keys.reduce((b, k) => b.or(matchAny(of(k))), qb);
+    case 'none': return keys.flatMap(of).reduce((b, t) => b.not('search_text', 'imatch', termRegexPg(t)), qb);
+    case 'miss_any': return qb.or(keys.map((k) => `and(${matchNone(of(k))})`).join(','));
+    default: {
+      const k = pico.slice(5) as PicoKey;
+      return keys.includes(k) ? of(k).reduce((b, t) => b.not('search_text', 'imatch', termRegexPg(t)), qb) : nothing(qb);
+    }
   }
 }
 

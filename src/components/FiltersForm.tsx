@@ -1,15 +1,17 @@
 import type { RefFilters, RefSort, SortKey } from '../lib/api/references';
-import { KW_LABELS, SORT_LABELS } from '../lib/api/references';
+import { KW_LABELS, PICO_FILTER_LABELS, SORT_LABELS } from '../lib/api/references';
 import type { Facets, Stage, Tag } from '../lib/types';
 import { Button, Input, Label, Select } from './ui';
 
 export function FiltersForm({
-  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false,
+  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false, picoReady = false,
 }: {
   filters: RefFilters; setFilters: (f: Partial<RefFilters>) => void; clearFilters: () => void;
   facets: Facets | undefined; tags: Tag[] | undefined; stage: Stage; idPrefix?: string;
   /** True when the project has criteria keywords. */
   criteriaReady?: boolean;
+  /** True when the project has PICO keywords. */
+  picoReady?: boolean;
 }) {
   const id = (s: string) => `${idPrefix}-${s}`;
   return (
@@ -24,6 +26,14 @@ export function FiltersForm({
           <option value="exclude">✕ Excluded</option>
           {stage === 'title_abstract' && <option value="maybe">? Maybe</option>}
         </Select>
+      </div>
+      <div>
+        <Label htmlFor={id('pico')}>PICO elements</Label>
+        <Select id={id('pico')} value={filters.pico} disabled={!picoReady && !filters.pico}
+          onChange={(e) => setFilters({ pico: e.target.value as RefFilters['pico'] })}>
+          {(Object.keys(PICO_FILTER_LABELS) as RefFilters['pico'][]).map((k) => <option key={k} value={k}>{PICO_FILTER_LABELS[k]}</option>)}
+        </Select>
+        {!picoReady && <p className="mt-1 text-xs text-slate-500">Add keywords in Settings → PICO keywords to use this filter.</p>}
       </div>
       <div>
         <Label htmlFor={id('kw')}>Criteria keywords</Label>

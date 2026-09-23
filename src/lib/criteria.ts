@@ -8,9 +8,24 @@
 export interface CriteriaTerms {
   include: string[];
   exclude: string[];
+  /** Keywords per PICO element (optional; absent in older projects). */
+  pico?: PicoTerms;
 }
 
-export const EMPTY_TERMS: CriteriaTerms = { include: [], exclude: [] };
+/** PICO elements (plus study design, the "S" of PICOS). */
+export type PicoKey = 'P' | 'I' | 'C' | 'O' | 'S';
+export type PicoTerms = Record<PicoKey, string[]>;
+export const PICO_KEYS: PicoKey[] = ['P', 'I', 'C', 'O', 'S'];
+export const PICO_LABELS: Record<PicoKey, string> = {
+  P: 'Population', I: 'Intervention / exposure', C: 'Comparator', O: 'Outcomes', S: 'Study design',
+};
+/** Project field holding the written text for each element. */
+export const PICO_FIELDS = {
+  P: 'population', I: 'intervention_or_exposure', C: 'comparator', O: 'outcomes', S: 'study_design',
+} as const satisfies Record<PicoKey, string>;
+export const EMPTY_PICO: PicoTerms = { P: [], I: [], C: [], O: [], S: [] };
+
+export const EMPTY_TERMS: CriteriaTerms = { include: [], exclude: [], pico: EMPTY_PICO };
 
 /** Parse a textarea (one term per line, or separated by commas / semicolons). */
 export function parseTerms(text: string): string[] {
@@ -22,15 +37,34 @@ export function parseTerms(text: string): string[] {
   return out.slice(0, 60);
 }
 
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
 export function termsFromSettings(settings: Record<string, unknown> | null | undefined): CriteriaTerms {
-  const c = (settings?.criteria_terms ?? {}) as Partial<CriteriaTerms>;
+  const c = (settings?.criteria_terms ?? {}) as Partial<Record<keyof CriteriaTerms, unknown>>;
+  const p = (c.pico ?? {}) as Partial<Record<PicoKey, unknown>>;
   return {
-    include: Array.isArray(c.include) ? c.include.filter((x) => typeof x === 'string') : [],
-    exclude: Array.isArray(c.exclude) ? c.exclude.filter((x) => typeof x === 'string') : [],
+    include: strings(c.include),
+    exclude: strings(c.exclude),
+    pico: { P: strings(p.P), I: strings(p.I), C: strings(p.C), O: strings(p.O), S: strings(p.S) },
   };
 }
 
 export const hasTerms = (t: CriteriaTerms) => t.include.length > 0 || t.exclude.length > 0;
+
+/** PICO elements that have at least one keyword. */
+export const activePico = (t: CriteriaTerms): PicoKey[] => PICO_KEYS.filter((k) => (t.pico?.[k]?.length ?? 0) > 0);
+export const hasPico = (t: CriteriaTerms) => activePico(t).length > 0;
+
+export interface PicoResult {
+  key: PicoKey;
+  label: string;
+  found: string[];
+}
+
+/** For each PICO element with keywords, which of its keywords occur in the text. A reading aid only. */
+export function picoCheck(text: string | null | undefined, t: CriteriaTerms): PicoResult[] {
+  return activePico(t).map((key) => ({ key, label: PICO_LABELS[key], found: matchTerms(text, t.pico![key]) }));
+}
 
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -1,5 +1,6 @@
 import type { Project } from '../lib/types';
-import type { CriteriaTerms } from '../lib/criteria';
+import { PICO_KEYS, PICO_LABELS, activePico, type CriteriaTerms } from '../lib/criteria';
+import { PICO_MARK } from './Pico';
 import { EXC_MARK, INC_MARK } from './CriteriaKeywords';
 
 export function CriteriaView({ project, compact, terms }: { project: Project; compact?: boolean; terms?: CriteriaTerms }) {
@@ -37,6 +38,17 @@ export function CriteriaView({ project, compact, terms }: { project: Project; co
           <h3 className="text-xs font-bold tracking-wide text-slate-500 uppercase">Criteria keywords (highlighted in abstracts)</h3>
           <p className="mt-1 flex flex-wrap gap-1">{terms.include.map((t) => <span key={t} className={INC_MARK}>{t}</span>)}</p>
           <p className="mt-1 flex flex-wrap gap-1">{terms.exclude.map((t) => <span key={t} className={EXC_MARK}>{t}</span>)}</p>
+        </div>
+      )}
+      {terms && activePico(terms).length > 0 && (
+        <div>
+          <h3 className="text-xs font-bold tracking-wide text-slate-500 uppercase">PICO keywords (highlighted in abstracts)</h3>
+          {PICO_KEYS.filter((k) => terms.pico?.[k]?.length).map((k) => (
+            <p key={k} className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="text-xs font-medium text-slate-600">{PICO_LABELS[k]}:</span>
+              {terms.pico![k].map((t) => <span key={t} className={PICO_MARK[k]}>{t}</span>)}
+            </p>
+          ))}
         </div>
       )}
       {anyPico && (

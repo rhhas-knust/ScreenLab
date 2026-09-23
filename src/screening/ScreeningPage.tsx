@@ -8,10 +8,11 @@ import { createReason } from '../lib/api/tags';
 import { updateSettings } from '../lib/api/projects';
 import { friendlyError } from '../lib/errors';
 import { fmt, pct, qk, useCriteriaTerms, useFacets, useProject, useReasons, useSettings, useStats, useTags } from '../lib/hooks';
-import { hasTerms } from '../lib/criteria';
+import { hasPico, hasTerms } from '../lib/criteria';
 import { useSelection } from '../lib/useSelection';
 import { BulkDecisionBar } from '../components/BulkDecision';
 import { KeywordCheck } from '../components/CriteriaKeywords';
+import { PicoCheck } from '../components/Pico';
 import { outbox } from '../lib/outbox';
 import { useFilterParams } from '../lib/useFilterParams';
 import { useMediaQuery } from '../lib/useMediaQuery';
@@ -546,7 +547,7 @@ export function ScreeningPage() {
         </div>
         {filtersOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" criteriaReady={hasTerms(criteria)} />
+            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" criteriaReady={hasTerms(criteria)} picoReady={hasPico(criteria)} />
           </div>
         )}
         <div className="text-xs text-slate-600">
@@ -641,6 +642,7 @@ export function ScreeningPage() {
 
   const detailPanels = current && (
     <div className="space-y-5">
+      <PicoCheck reference={current} terms={criteria} projectId={projectId} />
       <KeywordCheck reference={current} terms={criteria} projectId={projectId} />
       <NotesEditor reference={current} projectId={projectId} onLocalChange={(notes) => applyLocal({ notes })} />
       <TagEditor reference={current} tags={tags} projectId={projectId} onChange={(tag_names) => applyLocal({ tag_names })} />

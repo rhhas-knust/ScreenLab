@@ -5,7 +5,8 @@ import { fetchMatchingIds, listReferences } from '../lib/api/references';
 import { useFilterParams } from '../lib/useFilterParams';
 import { useSelection } from '../lib/useSelection';
 import { fmt, qk, useCriteriaTerms, useFacets, useReasons, useSettings, useTags } from '../lib/hooks';
-import { hasTerms, matchTerms, referenceText } from '../lib/criteria';
+import { hasPico, hasTerms, matchTerms, referenceText } from '../lib/criteria';
+import { PicoLetters } from '../components/Pico';
 import { friendlyError } from '../lib/errors';
 import { outbox } from '../lib/outbox';
 import type { Reference } from '../lib/types';
@@ -54,6 +55,7 @@ export function ReferencesPage() {
   const pageAll = rows.length > 0 && rows.every((r) => sel.has(r.id));
   const pageSome = rows.some((r) => sel.has(r.id));
   const kwOn = hasTerms(criteria);
+  const picoOn = hasPico(criteria);
 
   const afterBulk = () => {
     sel.clear();
@@ -99,7 +101,7 @@ export function ReferencesPage() {
       {showFilters && (
         <Card className="mt-3 p-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="rf" criteriaReady={kwOn} />
+            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="rf" criteriaReady={kwOn} picoReady={picoOn} />
           </div>
         </Card>
       )}
@@ -133,6 +135,7 @@ export function ReferencesPage() {
                 </th>
                 <th className="px-3 py-2">#</th><th className="px-3 py-2">Title</th><th className="px-3 py-2">First author</th><th className="px-3 py-2">Year</th>
                 <th className="px-3 py-2">Database</th><th className="px-3 py-2">Title/abstract</th>{settings?.stage2_enabled && <th className="px-3 py-2">Full text</th>}
+                {picoOn && <th className="px-3 py-2" title="PICO elements found in title, abstract and keywords (faded = not found)">PICO</th>}
                 {kwOn && <th className="px-3 py-2" title="Criteria keywords found in title, abstract and keywords">Keywords</th>}
                 <th className="px-3 py-2">Tags</th>
               </tr>
@@ -165,6 +168,7 @@ export function ReferencesPage() {
                     <td className="px-3 py-2">{r.database_source}</td>
                     <td className="px-3 py-2"><DecisionBadge decision={r.title_abstract_decision} reason={r.title_abstract_exclusion_reason} /></td>
                     {settings?.stage2_enabled && <td className="px-3 py-2">{r.title_abstract_decision === 'include' ? <DecisionBadge decision={r.full_text_decision} reason={r.full_text_exclusion_reason} /> : <span className="text-xs text-slate-400">—</span>}</td>}
+                    {picoOn && <td className="px-3 py-2 text-xs whitespace-nowrap"><PicoLetters reference={r} terms={criteria} /></td>}
                     {kwOn && (
                       <td className="px-3 py-2 text-xs whitespace-nowrap" title={[inc.length ? `Inclusion: ${inc.join(', ')}` : '', exc.length ? `Exclusion: ${exc.join(', ')}` : ''].filter(Boolean).join('\n') || 'No keywords found'}>
                         <span className={inc.length ? 'font-semibold text-emerald-800' : 'text-slate-400'}>✓{inc.length}</span>{' '}

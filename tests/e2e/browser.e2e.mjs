@@ -513,6 +513,24 @@ try {
   check('Keyword check panel lists matches (reading aid)', /Inclusion\s*sensor\*/.test(await page.getByTestId('keyword-check').textContent()));
   await shot(page, '25-keywords-screening');
 
+  // PICO keywords: per-element check beside the decision buttons, highlights and filters
+  await page.goto(`${APP}/p/${bkId}/settings#pico`);
+  await page.getByLabel(/^P Population keywords/).fill('imaginary patients\nhospital');
+  await page.getByLabel(/^I Intervention \/ exposure keywords/).fill('sensor*\nwidget therapy');
+  await page.getByLabel(/^O Outcomes keywords/).fill('pathogen*');
+  await page.getByRole('button', { name: 'Save PICO keywords' }).click();
+  await page.getByText('PICO keywords saved').waitFor();
+  await page.goto(`${APP}/p/${bkId}/screening?q=sensors`);
+  await page.getByTestId('pico-check').waitFor();
+  check('PICO check shows which elements each article mentions', /3 of 3 elements found/.test(await page.getByTestId('pico-summary').textContent()));
+  check('PICO elements are highlighted in the article', await visible(page.locator('#article-title mark[title^="Population keyword"]')));
+  check('Saving PICO keywords keeps the criteria keywords', /Inclusion\s*sensor\*/.test(await page.getByTestId('keyword-check').textContent()));
+  await shot(page, '25b-pico-screening');
+  await page.goto(`${APP}/p/${bkId}/references?pico=miss_O`);
+  await page.getByText('6 references in this view').waitFor({ timeout: 10000 });
+  check('Filter: a PICO element missing', (await page.locator('tbody tr').count()) === 6);
+  check('References list shows PICO letters per record', await visible(page.locator('th', { hasText: 'PICO' })));
+
   await page.goto(`${APP}/p/${bkId}/references?kw=exc_only`);
   await page.getByText('1 references in this view').waitFor({ timeout: 10000 });
   check('Filter: exclusion keywords but no inclusion keywords', (await page.locator('tbody tr').count()) === 1);

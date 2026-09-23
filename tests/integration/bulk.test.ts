@@ -54,6 +54,28 @@ describe('criteria keyword filter (server side, whole words)', () => {
   });
 });
 
+describe('PICO filter (server side)', () => {
+  const pico = { P: ['imaginary patients', 'hospital'], I: ['widget therapy', 'sensor*'], C: [], O: ['pathogen*'], S: [] };
+  const titles = async (f: typeof DEFAULT_FILTERS.pico) =>
+    (await listReferences(project.id, 'title_abstract', { ...DEFAULT_FILTERS, pico: f, terms: { ...terms, pico } }, DEFAULT_SORT, 0, 50)).rows.map((r) => r.title).sort();
+  it('all elements found (empty elements ignored)', async () => {
+    expect(await titles('all')).toEqual(['Imaginary sensors for detecting fictional pathogens in a pretend hospital']);
+  });
+  it('a specific element missing / at least one missing / none found', async () => {
+    const outcomesMissing = await titles('miss_O');
+    expect(outcomesMissing).toHaveLength(6);
+    expect(outcomesMissing).toContain('Fictional trial of widget therapy in imaginary patients');
+    expect(await titles('miss_any')).toEqual(outcomesMissing);
+    expect(await titles('miss_P')).not.toContain('Fictional trial of widget therapy in imaginary patients');
+    expect(await titles('none')).toHaveLength(4);
+    expect(await titles('miss_C')).toEqual([]); // no Comparator keywords → filter matches nothing
+  });
+  it('can be combined with the status filter and fetched for bulk selection', async () => {
+    const ids = await fetchMatchingIds(project.id, 'title_abstract', { ...DEFAULT_FILTERS, status: 'unscreened', pico: 'none', terms: { ...terms, pico } }, DEFAULT_SORT);
+    expect(ids).toHaveLength(4);
+  });
+});
+
 describe('bulk decisions', () => {
   it('applies one decision to many records, each with its own audit entry, and can be undone', async () => {
     const all = await fetchMatchingIds(project.id, 'title_abstract', DEFAULT_FILTERS, DEFAULT_SORT);

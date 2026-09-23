@@ -68,7 +68,8 @@ export function CriteriaKeywordsEditor({ project, settings }: { project: Project
     setSaving(true);
     try {
       const terms: CriteriaTerms = { include: parseTerms(inc), exclude: parseTerms(exc) };
-      await updateSettings(project.id, { settings: { ...(settings.settings ?? {}), criteria_terms: terms } });
+      const existing = (settings.settings?.criteria_terms ?? {}) as Record<string, unknown>;
+      await updateSettings(project.id, { settings: { ...(settings.settings ?? {}), criteria_terms: { ...existing, ...terms } } });
       await logActivity(project.id, 'settings', `Updated criteria keywords (${terms.include.length} inclusion, ${terms.exclude.length} exclusion)`, { criteria_terms: terms });
       await qc.invalidateQueries({ queryKey: qk.settings(project.id) });
       setInc(terms.include.join('\n'));

@@ -84,6 +84,15 @@ asks for a quick confirmation. Decisions are shown with icons and words, never c
   to the decision buttons, counted per row on the References page, and usable as a **filter**
   (“has inclusion keywords”, “exclusion keywords but no inclusion keywords”, …). They are a
   reading and filtering aid only — they never make a decision.
+- **PICO keywords** (*Settings → PICO keywords*): keywords and synonyms for each element —
+  Population, Intervention/exposure, Comparator, Outcomes, Study design (*Suggest from my PICO*
+  fills them from your protocol for you to edit). Each article gets a **PICO check** beside the
+  decision buttons (“3 of 4 elements found — not found: Outcomes”), each element is highlighted
+  in its own colour with its letter, the References page shows P I C O S per row, and the
+  **PICO elements** filter finds records with all elements, at least one missing, none, or a
+  specific element missing (e.g. *Population missing* → select → bulk exclude “Wrong
+  population” after checking them). Empty elements are ignored. Keyword matches only — the
+  decision is always yours.
 - Server-side search (title, abstract, authors, journal, DOI, PMID, keywords, notes, tags),
   filters (status, database, year range, publication type, language, tags, duplicate status,
   full-text status, exclusion reason) and sorting — fast with 20 000+ records
@@ -206,6 +215,8 @@ review (or click **Try demo** to practise on 20 clearly fictional references).
    *Mark others as duplicate* or *Keep both*.
 4. **Screen titles/abstracts** — *Continue screening*. Use `I` / `E` / `M` (or the buttons).
    Open **Review criteria** (`C`) at any time. Add notes and tags in the right-hand panel.
+   Tip: add **PICO keywords** in Settings first — the PICO check shows at a glance which parts
+   of your question each abstract mentions, and the *PICO elements* filter groups similar records.
 5. **Resolve “Maybe”s** — set the status filter to *Maybe* to step through them.
 6. **Full-text screening** — switch the stage to *Full text*. Open the full-text link or
    upload the PDF, then Include / Exclude (with a reason).
@@ -309,7 +320,7 @@ in its own table and shown separately — never written into the human decision 
 | --- | --- | --- |
 | Unit | Importers (CSV/TSV, RIS, BibTeX, MEDLINE), field mapping, normalisation, duplicate grouping | `npm test` |
 | Integration | Real database: import, dedupe, merge/reopen, decisions + audit history, undo, queue, navigation, search, filters, tags, stats, backup → restore, and Row Level Security (a second user attacking the first) | `npm run test:integration` |
-| Browser end-to-end | The full workflow in Chromium (81 checks): sign-up, sign-in/out, create review, import all formats, screening with keyboard and buttons, reasons, auto-advance, undo, notes, tags, reload, search, filters, full text + PDF, duplicates, statistics, activity, exports, backup/restore, offline & server-outage handling, cross-user access, demo, mobile (390 px) and Chromebook (1280×720) layouts, project deletion, 5 000-record import | `npm run test:e2e` |
+| Browser end-to-end | The full workflow in Chromium (100+ checks): sign-up, sign-in/out, create review, import all formats, screening with keyboard and buttons, reasons, auto-advance, undo, notes, tags, reload, search, filters, full text + PDF, duplicates, statistics, activity, exports, backup/restore, offline & server-outage handling, cross-user access, demo, mobile (390 px) and Chromebook (1280×720) layouts, project deletion, 5 000-record import | `npm run test:e2e` |
 
 The integration and browser tests run against a **local test stack**
 (`tests/e2e/localstack/`): PostgreSQL 16 with the real migration applied plus a small
