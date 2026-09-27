@@ -279,7 +279,15 @@ async function handleRest(req, res, url, body) {
         const arr = Array.isArray(json) ? json : [json];
         const cols = [...new Set(arr.flatMap((r) => Object.keys(r)))];
         params.push(JSON.stringify(arr));
-        const q = `with ins as (insert into ${table} (${cols.map(qi).join(', ')}) select ${cols.map(qi).join(', ')} from json_populate_recordset(null::${table}, $1) returning *) select ${selectCols(url)} from ins`;
+        let conflict = '';
+        if (/resolution=(merge|ignore)-duplicates/.test(prefer)) {
+          const key = (url.searchParams.get('on_conflict') ?? 'id').split(',').map((x) => qi(x.trim())).join(', ');
+          const upd = cols.filter((x) => x !== 'id');
+          conflict = /merge-duplicates/.test(prefer) && upd.length
+            ? ` on conflict (${key}) do update set ${upd.map((x) => `${qi(x)} = excluded.${qi(x)}`).join(', ')}`
+            : ` on conflict (${key}) do nothing`;
+        }
+        const q = `with ins as (insert into ${table} (${cols.map(qi).join(', ')}) select ${cols.map(qi).join(', ')} from json_populate_recordset(null::${table}, $1)${conflict} returning *) select ${selectCols(url)} from ins`;
         const rows = (await c.query(q, params)).rows;
         return { status: 201, rows: returning ? rows : null };
       }
@@ -357,7 +365,7 @@ async function handleRpc(req, res, fn, body, claims, single) {
       const r = (await c.query(`select ${call} as r`, params)).rows[0].r;
       return { status: 200, rows: r, scalar: true };
     });
-    if (out.scalar) return send(res, 200, out.rows === undefined ? null : out.rows);
+    if (out.scalar) return send(res, 200, JSON.stringify(out.rows === undefined ? null : out.rows));
     return respondRows(res, out, single);
   } catch (e) {
     return pgError(res, e);

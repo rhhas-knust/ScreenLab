@@ -568,6 +568,59 @@ try {
   check('Screening list: Select mode → bulk Maybe', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='maybe'`) === '1');
   await shot(page, '27-screening-select');
 
+  // ---------------------------------------------------------------- ResearchHub questionnaire
+  await page.goto(`${APP}/research`);
+  await page.getByLabel('New questionnaire').fill('Study habits survey');
+  await page.getByRole('button', { name: 'Create questionnaire' }).click();
+  await page.getByRole('heading', { name: 'Study habits survey' }).waitFor();
+  const rhId = page.url().split('/research/')[1];
+  await page.getByLabel('Introduction').fill('Takes 2 minutes. Answers are anonymous.');
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 1', { exact: true }).fill('Which level are you in?');
+  await page.getByLabel('Answer type').nth(0).selectOption('radio');
+  await page.getByLabel('Options').fill('300\n400');
+  await page.getByText('Required').nth(0).click();
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 2', { exact: true }).fill('Hours of study per week');
+  await page.getByLabel('Answer type').nth(1).selectOption('number');
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 3', { exact: true }).fill('My workload is manageable');
+  await page.getByLabel('Answer type').nth(2).selectOption('scale');
+  await page.getByRole('button', { name: 'Preview' }).click();
+  check('ResearchHub: preview shows the questions', (await page.getByTestId('rh-form-question').count()) === 3);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await page.getByTestId('rh-share-url').waitFor();
+  const shareUrl = await page.getByTestId('rh-share-url').inputValue();
+  check('ResearchHub: publishing gives a public link', shareUrl.endsWith(`/f/${rhId}`), shareUrl);
+  await shot(page, '28-rh-builder');
+
+  const pub = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const pp = await pub.newPage();
+  await pp.goto(shareUrl.replace(/^https?:\/\/[^/]+/, APP));
+  await pp.getByRole('heading', { name: 'Study habits survey' }).waitFor();
+  await pp.getByRole('button', { name: 'Submit' }).click();
+  check('ResearchHub: required questions are enforced (no account needed)', await visible(pp.getByText('This question is required.')));
+  await pp.getByLabel('400').check();
+  await pp.getByRole('textbox', { name: /Hours of study per week/ }).fill('lots');
+  await pp.getByRole('button', { name: 'Submit' }).click();
+  check('ResearchHub: numbers are validated', await visible(pp.getByText('Please enter a number.')));
+  await pp.getByRole('textbox', { name: /Hours of study per week/ }).fill('12');
+  await pp.getByText('4', { exact: true }).click();
+  await shot(pp, '29-rh-public-form-mobile');
+  await pp.getByRole('button', { name: 'Submit' }).click();
+  check('ResearchHub: respondent sees the thank-you screen', await visible(pp.getByRole('heading', { name: 'Thank you!' })));
+  await pub.close();
+  check('ResearchHub: answer stored', sql(`select answers::text from rh_responses where project_id='${rhId}'`).includes('"400"'));
+
+  await page.goto(`${APP}/research/${rhId}/responses`);
+  await page.getByTestId('rh-response-count').waitFor();
+  check('ResearchHub: owner sees the response', /^1 response$/.test(await page.getByTestId('rh-response-count').textContent()));
+  const [rhDl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Download CSV/ }).click()]);
+  const rhCsv = fs.readFileSync(await rhDl.path(), 'utf8');
+  check('ResearchHub: CSV export has one column per question', /Which level are you in\?/.test(rhCsv) && /,400,12,4/.test(rhCsv), rhCsv.split('\n')[1]);
+  await shot(page, '30-rh-responses');
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

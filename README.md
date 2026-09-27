@@ -115,6 +115,28 @@ the URL.
 
 ---
 
+## ResearchHub (questionnaires)
+
+*ResearchHub* (top menu, or the link on the Projects page) lets final-year students collect
+survey data for their project:
+
+1. **Create a questionnaire** — title, introduction (purpose, consent, time needed), university,
+   department, year and a thank-you message.
+2. **Add questions** — short answer, paragraph, number, multiple choice, checkboxes, scale 1–5 or
+   email; mark questions required, reorder, duplicate, preview.
+3. **Publish** and share the link (copy, WhatsApp). Respondents need no account and can answer
+   on a phone.
+4. **Responses** — see every answer in a table and download a CSV for Excel, SPSS, Stata or R.
+   *Close responses* stops new submissions; *Reopen* resumes them.
+
+Security: questionnaires and answers are private to their owner (Row Level Security).
+Respondents can only load a published questionnaire and submit through a server function that
+checks every answer (required questions, number/email format, allowed options, scale 1–5),
+drops anything unexpected and limits bursts of submissions. Drafts are invisible to the public.
+
+Coming next: charts and statistics per question, PDF report and an AI-written findings summary
+(run on the server so no API key is ever exposed in the browser).
+
 ## Technology
 
 | Part | Choice |

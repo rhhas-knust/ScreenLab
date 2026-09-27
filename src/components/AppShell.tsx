@@ -54,6 +54,7 @@ export function AppShell({ children, fullHeight = false }: { children: ReactNode
           )}
           <nav aria-label="Main" className="hidden flex-1 items-center gap-1 overflow-x-auto lg:flex">
             <NavLink to="/projects" end className={linkCls}>Projects</NavLink>
+            {!projectId && <NavLink to="/research" className={linkCls}>ResearchHub</NavLink>}
             {projectId && PROJECT_NAV.map((n) => (
               <NavLink key={n.label} to={`/p/${projectId}${n.to ? `/${n.to}` : ''}`} end={n.end} className={linkCls}>{n.label}</NavLink>
             ))}
@@ -76,6 +77,7 @@ export function AppShell({ children, fullHeight = false }: { children: ReactNode
                   <div className="truncate px-3 py-2 text-xs text-slate-500">Signed in as<br /><span className="text-sm text-slate-800">{user?.email}</span></div>
                   <div className="border-t border-slate-100 lg:hidden">
                     <Link role="menuitem" to="/projects" className="block px-3 py-2 text-sm hover:bg-slate-50">Projects</Link>
+                    <Link role="menuitem" to="/research" className="block px-3 py-2 text-sm hover:bg-slate-50">ResearchHub</Link>
                     {projectId && PROJECT_NAV.map((n) => (
                       <Link role="menuitem" key={n.label} to={`/p/${projectId}${n.to ? `/${n.to}` : ''}`} className="block px-3 py-2 text-sm hover:bg-slate-50">{n.label}</Link>
                     ))}

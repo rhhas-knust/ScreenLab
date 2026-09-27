@@ -66,7 +66,7 @@ export function ProjectsPage() {
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h1 className="text-2xl font-semibold text-ink-900">My Systematic Reviews</h1>
-              <p className="text-sm text-slate-600">{data?.length} project{data?.length === 1 ? '' : 's'}</p>
+              <p className="text-sm text-slate-600">{data?.length} project{data?.length === 1 ? '' : 's'} · <Link to="/research" className="font-medium text-ink-800 underline">ResearchHub questionnaires →</Link></p>
             </div>
             {actions}
           </div>
