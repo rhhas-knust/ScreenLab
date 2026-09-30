@@ -20,7 +20,7 @@ const DUP_TEXT: Record<string, string> = {
   merged: '⧉ Merged into another record (removed from screening)',
 };
 
-export function ArticleView({ reference: r, stage, terms, criteria }: { reference: Reference; stage: Stage; terms: string[]; criteria?: CriteriaTerms }) {
+export function ArticleView({ reference: r, stage, terms, criteria, afterAbstract }: { reference: Reference; stage: Stage; terms: string[]; criteria?: CriteriaTerms; afterAbstract?: ReactNode }) {
   const doiLink = isValidDoi(r.doi) ? doiUrl(r.doi) : null;
   const pmLink = pubmedUrl(r.pmid);
   const citation = [r.journal, r.year, r.volume && `${r.volume}${r.issue ? `(${r.issue})` : ''}`, r.pages].filter(Boolean).join(' · ');
@@ -55,6 +55,7 @@ export function ArticleView({ reference: r, stage, terms, criteria }: { referenc
           <p className="text-sm text-slate-500 italic">No abstract available for this record.</p>
         )}
       </section>
+      {afterAbstract}
 
       <dl className="mt-6 border-t border-slate-200 pt-3">
         {r.keywords && <Meta label="Keywords"><Highlight text={r.keywords} search={terms} terms={criteria} /></Meta>}

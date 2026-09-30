@@ -240,8 +240,11 @@ review (or click **Try demo** to practise on 20 clearly fictional references).
    Tip: add **PICO keywords** in Settings first — the PICO check shows at a glance which parts
    of your question each abstract mentions, and the *PICO elements* filter groups similar records.
 5. **Resolve “Maybe”s** — set the status filter to *Maybe* to step through them.
-6. **Full-text screening** — switch the stage to *Full text*. Open the full-text link or
-   upload the PDF, then Include / Exclude (with a reason).
+6. **Full-text screening** — switch the stage to *Full text*. Under each abstract the **Full
+   text** box checks OpenAlex (by DOI only) for a free, legal PDF (*Open free PDF*) and offers
+   one-click *Publisher*, *Google Scholar* and *Europe PMC* links. Drag a downloaded PDF onto
+   the box (or *Attach PDF*) and it opens right there beside the decision buttons. Then
+   Include / Exclude (with a reason). The header shows how many are left to reach halfway.
 7. **Track progress** — Dashboard, *Statistics* and the *Activity log*.
 
 Tips: the progress bar counts records after duplicates are removed; untick *Automatically open

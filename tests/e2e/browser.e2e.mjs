@@ -266,6 +266,11 @@ try {
   await popup.waitForURL(/storage\/v1\/object\/sign/, { timeout: 10000 }).catch(() => {});
   check('View PDF opens a signed link', popup.url().includes('/storage/v1/object/sign/'), popup.url().slice(0, 80));
   await popup.close();
+  check('Full-text finder: attach option (untitled record hides title-search links)', await visible(page.getByTestId('ft-finder').getByText('Attach another PDF'))
+    && (await page.getByTestId('ft-finder').getByRole('link', { name: /Google Scholar/ }).count()) === 0);
+  check('Full-text finder: the attached PDF opens inside the screening page', await visible(page.locator('[data-testid="ft-finder"] iframe[src*="/storage/v1/object/sign/"]')));
+  check('Full-text header shows progress to halfway', /halfway/.test(await page.getByTestId('halfway').textContent()));
+  await shot(page, '10b-fulltext-pdf-inline');
 
   // ---------------------------------------------------------------- TEST 24
   await page.goto(`${APP}/p/${projectId}/duplicates`);

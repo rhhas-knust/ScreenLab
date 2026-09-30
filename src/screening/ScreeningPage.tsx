@@ -23,6 +23,7 @@ import { CriteriaView } from '../components/CriteriaView';
 import { Alert, Button, Input, Modal, PageLoader, ProgressBar, Spinner, cx } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { ArticleView } from './ArticleView';
+import { FullTextFinder } from './FullTextFinder';
 import { ConfirmChangeBar, DecisionButtons, ReasonPicker, type PendingChange } from './DecisionPanel';
 import { NotesEditor } from './NotesEditor';
 import { TagEditor } from './TagEditor';
@@ -689,6 +690,9 @@ export function ScreeningPage() {
           <span className="truncate text-xs text-slate-600 sm:text-sm">
             <strong className="text-ink-900">{stage === 'title_abstract' ? 'Title / abstract screening' : 'Full-text screening'}</strong>
             <span className="tabular-nums"> · {fmt(done)} / {fmt(total)} screened</span>
+            {stage === 'full_text' && total > 0 && (
+              <span className="tabular-nums" data-testid="halfway"> · {done >= Math.ceil(total / 2) ? '✓ past halfway' : `${fmt(Math.ceil(total / 2) - done)} to halfway`}</span>
+            )}
           </span>
           <div className="ml-auto flex items-center gap-1">
             <Button size="sm" variant="ghost" onClick={() => setCriteriaOpen(true)} aria-keyshortcuts="C"><span className="hidden sm:inline">Review</span> criteria</Button>
@@ -730,7 +734,8 @@ export function ScreeningPage() {
                 <p className="text-sm">Current decision: <DecisionBadge decision={curDecision} reason={curReason} /></p>
               </div>
             )}
-            <ArticleView reference={current} stage={stage} terms={terms} criteria={criteria} />
+            <ArticleView reference={current} stage={stage} terms={terms} criteria={criteria}
+              afterAbstract={stage === 'full_text' ? <FullTextFinder key={current.id} reference={current} projectId={projectId} onLocalChange={applyLocal} /> : undefined} />
             {!isLg && <div className="mx-auto max-w-3xl border-t border-slate-200 px-4 py-5 sm:px-6">{detailPanels}</div>}
             {!isLg && <div className="h-44" aria-hidden="true" />}
           </div>
