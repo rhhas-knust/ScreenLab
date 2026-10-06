@@ -2,7 +2,7 @@ import { Kbd, Modal } from '../components/ui';
 
 const ROWS: [string, string][] = [
   ['I', 'Include'], ['E', 'Exclude (then 1–9 to pick a reason)'], ['M', 'Maybe (title/abstract only)'],
-  ['N', 'Next article in list'], ['P', 'Previous article in list'], ['U', 'Undo last decision'],
+  ['N', 'Next article in list'], ['P', 'Previous article in list'], ['U', 'Undo last decision'], ['A', 'Agree with the AI suggestion (records it as your decision)'],
   ['/', 'Search'], ['C', 'Show review criteria'], ['L', 'Show article list (small screens)'], ['?', 'This help'], ['Esc', 'Close panel / cancel'],
 ];
 

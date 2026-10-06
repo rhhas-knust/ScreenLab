@@ -7,6 +7,7 @@ import { importRecords } from '../../src/lib/api/importer';
 import { DEFAULT_FILTERS, DEFAULT_SORT, fetchMatchingIds, listReferences, recordDecisionsBulk, getDecisionHistory } from '../../src/lib/api/references';
 import { parseCsv, parseRis } from '../../src/lib/import/parsers';
 import type { Project } from '../../src/lib/types';
+import { aiSuggestedIds } from '../../src/lib/api/ai';
 
 const PW = process.env.E2E_PASSWORD ?? 'E2e-test-password-1';
 const A = process.env.E2E_EMAIL_A ?? 'e2e-a@screenlab.test';
@@ -129,5 +130,22 @@ describe('bulk decisions', () => {
     const big = Array.from({ length: 1001 }, () => ({ id: '00000000-0000-0000-0000-000000000000', decision: 'include' }));
     const r2 = await supabase.rpc('record_decisions_bulk', { p_stage: 'title_abstract', p_items: big });
     expect(r2.error?.message).toMatch(/maximum 1000/);
+  });
+});
+
+describe('AI suggestions (RLS)', () => {
+  it('are private to the project and cannot be planted by another user', async () => {
+    await signIn(A);
+    const [ref] = await fetchMatchingIds(project.id, 'title_abstract', DEFAULT_FILTERS, DEFAULT_SORT);
+    const row = { project_id: project.id, reference_id: ref.id, stage: 'title_abstract', model: 'm', recommendation: 'include', confidence: 'low', summary: 's', source: 'abstract' };
+    const { data: me } = await supabase.auth.getUser();
+    expect((await supabase.from('ai_suggestions').insert({ ...row, created_by: me.user!.id })).error).toBeNull();
+    expect(await aiSuggestedIds(project.id, 'title_abstract')).toContain(ref.id);
+    await signIn(B);
+    const { data: other } = await supabase.auth.getUser();
+    expect((await supabase.from('ai_suggestions').select('id').eq('project_id', project.id)).data).toEqual([]);
+    expect((await supabase.from('ai_suggestions').insert({ ...row, created_by: other.user!.id })).error).toBeTruthy();
+    await signIn(A);
+    expect((await supabase.from('study_references').select('title_abstract_decision').eq('id', ref.id).single()).data?.title_abstract_decision).toBeNull();
   });
 });

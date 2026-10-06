@@ -531,6 +531,28 @@ try {
   check('PICO elements are highlighted in the article', await visible(page.locator('#article-title mark[title^="Population keyword"]')));
   check('Saving PICO keywords keeps the criteria keywords', /Inclusion\s*sensor\*/.test(await page.getByTestId('keyword-check').textContent()));
   await shot(page, '25b-pico-screening');
+  // AI assistant (local stand-in for the Edge Function; advisory only)
+  await page.goto(`${APP}/p/${bkId}/screening?q=conference`);
+  await page.getByTestId('ai-ask').click();
+  await page.getByTestId('ai-suggestion').waitFor();
+  const aiText = await page.getByTestId('ai-suggestion').textContent();
+  check('AI assistant shows a suggestion with reason and evidence', /Exclude/.test(aiText) && /Wrong publication type/.test(aiText) && /conference paper/.test(aiText));
+  check('AI suggestion does not change the decision by itself', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision is not null`) === '0');
+  await shot(page, '25c-ai-suggestion');
+  await page.locator('#article-title').click();
+  await page.keyboard.press('a');
+  await waitSaved(page);
+  check('"I agree" (A key) records the reviewer\'s decision with the suggested reason', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='exclude' and title_abstract_exclusion_reason='Wrong publication type'`) === '1');
+  await page.locator('body').click({ position: { x: 5, y: 300 } }).catch(() => {});
+  await page.keyboard.press('u');
+  await waitSaved(page);
+  check('Undo works after accepting an AI suggestion', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision is not null`) === '0');
+  await page.goto(`${APP}/p/${bkId}/screening`);
+  await page.getByTestId('ai-batch').click();
+  await page.getByText(/Done — suggestions are ready/).waitFor({ timeout: 20000 });
+  check('AI pre-check runs over the unscreened queue', Number(sql(`select count(distinct reference_id) from ai_suggestions where project_id='${bkId}'`)) >= 6);
+  check('AI suggestions are kept for the audit trail (model, source)', sql(`select count(*) from ai_suggestions where project_id='${bkId}' and model='test-model' and source='abstract'`) !== '0');
+
   await page.goto(`${APP}/p/${bkId}/references?pico=miss_O`);
   await page.getByText('6 references in this view').waitFor({ timeout: 10000 });
   check('Filter: a PICO element missing', (await page.locator('tbody tr').count()) === 6);
@@ -553,7 +575,7 @@ try {
   await page.getByText(/2 records → Excluded — Wrong population/).waitFor();
   check('Bulk exclude with reason saved for each record (with audit rows)',
     sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision='exclude' and title_abstract_exclusion_reason='Wrong population'`) === '2'
-    && sql(`select count(*) from screening_decisions where project_id='${bkId}'`) === '2');
+    && sql(`select count(*) from screening_decisions where project_id='${bkId}' and exclusion_reason='Wrong population'`) === '2');
   await page.getByRole('button', { name: 'Undo' }).last().click();
   await page.getByText(/Undone — 2 records restored/).waitFor();
   check('Bulk undo restores every record', sql(`select count(*) from study_references where project_id='${bkId}' and title_abstract_decision is not null`) === '0');

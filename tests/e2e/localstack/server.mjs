@@ -67,6 +67,31 @@ function readBody(req) {
   });
 }
 const qi = (id) => `"${String(id).replace(/"/g, '""')}"`;
+/**
+ * Stand-in for the ai-screen Edge Function (no model call): same auth + RLS path,
+ * returns a deterministic suggestion. SL_AI=off simulates a missing API key.
+ */
+async function handleAiScreen(req, res, body) {
+  const claims = claimsFrom(req);
+  if (claims.role !== 'authenticated') return send(res, 401, { error: 'Please sign in again.' });
+  if (process.env.SL_AI === 'off') return send(res, 503, { error: 'AI is not set up yet: add ANTHROPIC_API_KEY under Supabase → Edge Functions → Secrets.', code: 'not_configured' });
+  const { reference_id, stage = 'title_abstract' } = JSON.parse(body.toString() || '{}');
+  const out = await asUser(claims, async (c) => {
+    const ref = (await c.query('select id, project_id, title from study_references where id = $1', [reference_id])).rows[0];
+    if (!ref) return null;
+    const excl = /conference/i.test(ref.title ?? '');
+    const row = (await c.query(
+      `insert into ai_suggestions(project_id, reference_id, stage, model, recommendation, exclusion_reason, confidence, summary, criteria, source, created_by)
+       values ($1, $2, $3, 'test-model', $4, $5, 'high', $6, $7, 'abstract', auth.uid()) returning *`,
+      [ref.project_id, ref.id, stage, excl ? 'exclude' : 'include', excl ? 'Wrong publication type' : null,
+        excl ? 'This is a conference paper, which the criteria exclude.' : 'Meets the criteria based on the abstract.',
+        JSON.stringify([{ criterion: 'Primary study', assessment: excl ? 'not_met' : 'met', evidence: excl ? 'conference paper' : 'not reported' }])])).rows[0];
+    return row;
+  });
+  if (!out) return send(res, 404, { error: 'Reference not found' });
+  return send(res, 200, out);
+}
+
 function claimsFrom(req) {
   const auth = req.headers.authorization ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
@@ -465,6 +490,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/auth/v1')) return await handleAuth(req, res, url, body);
     if (url.pathname.startsWith('/rest/v1')) return await handleRest(req, res, url, body);
     if (url.pathname.startsWith('/storage/v1')) return await handleStorage(req, res, url, body);
+    if (url.pathname === '/functions/v1/ai-screen') return await handleAiScreen(req, res, body);
     return send(res, 404, { message: 'not found' });
   } catch (e) {
     console.error(e);

@@ -115,6 +115,33 @@ the URL.
 
 ---
 
+## AI assistant (optional)
+
+The ✨ **AI assistant** in the screening panel reads an article against your criteria and PICO
+and **suggests** Include / Exclude (with an exclusion reason from your list) / Unsure, with a
+short quote as evidence for each criterion. At the full-text stage it reads your attached PDF,
+or a free open-access PDF when one exists, otherwise the abstract (it tells you which).
+
+- It never records a decision. You decide with I / E, or press **A** (or *I agree*) to record
+  the suggestion as **your** decision. Undo works as usual.
+- **Pre-check next N** runs it in the background for the upcoming unscreened records, so the
+  suggestions are ready when each article opens. **Auto** asks for each article as it opens.
+- Every suggestion is stored (model, source, time, user) for transparency. Report AI assistance
+  in your methods section if your guidelines require it.
+
+**Setup (once, about 2 minutes):**
+1. Create an API key at https://console.anthropic.com → *API keys* (add a little credit under
+   *Billing*).
+2. In Supabase → your project → **Edge Functions → Secrets**, add `ANTHROPIC_API_KEY` with the
+   key. The key stays on the server; it is never sent to the browser or stored in this
+   repository.
+3. Optional: add `AI_MODEL` to choose the model (default `claude-opus-5-5`; `claude-sonnet-5-5`
+   costs about half).
+
+Approximate cost with the default model: about **$0.01 per abstract** and **$0.10–0.30 per
+full-text PDF** (depends on length). Abstract-only full-text checks cost about the same as
+abstracts.
+
 ## ResearchHub (questionnaires)
 
 *ResearchHub* (top menu, or the link on the Projects page) lets final-year students collect

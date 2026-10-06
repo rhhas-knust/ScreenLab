@@ -24,6 +24,7 @@ import { Alert, Button, Input, Modal, PageLoader, ProgressBar, Spinner, cx } fro
 import { useToast } from '../components/Toast';
 import { ArticleView } from './ArticleView';
 import { FullTextFinder } from './FullTextFinder';
+import { AiPanel } from './AiPanel';
 import { ConfirmChangeBar, DecisionButtons, ReasonPicker, type PendingChange } from './DecisionPanel';
 import { NotesEditor } from './NotesEditor';
 import { TagEditor } from './TagEditor';
@@ -497,6 +498,8 @@ export function ScreeningPage() {
       '?': () => setHelpOpen(true),
       c: () => setCriteriaOpen(true),
       l: () => setListOpen((x) => !x),
+      // Accept the AI suggestion = the reviewer's own decision (button only exists when a suggestion is shown)
+      a: () => (document.querySelector('[data-testid="ai-accept"]') as HTMLButtonElement | null)?.click(),
     };
     const fn = actions[k];
     if (fn) {
@@ -643,6 +646,7 @@ export function ScreeningPage() {
 
   const detailPanels = current && (
     <div className="space-y-5">
+      <AiPanel reference={current} stage={stage} projectId={projectId} onAccept={(d, r) => decide(d, r)} />
       <PicoCheck reference={current} terms={criteria} projectId={projectId} />
       <KeywordCheck reference={current} terms={criteria} projectId={projectId} />
       <NotesEditor reference={current} projectId={projectId} onLocalChange={(notes) => applyLocal({ notes })} />
