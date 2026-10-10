@@ -89,7 +89,9 @@ export function AiPanel({ reference, stage, projectId, onAccept }: {
               ))}
             </ul>
           )}
-          <p className="text-slate-500">Based on {SOURCE[s.source]} · check before deciding.</p>
+          <p className="text-slate-500">
+            Based on {SOURCE[s.source]}{s.stage !== stage && ` (from the ${s.stage === 'full_text' ? 'full-text' : 'title/abstract'} review)`} · check before deciding.
+          </p>
           <div className="flex flex-wrap gap-1.5">
             {acceptable && (
               <Button size="sm" variant="secondary" onClick={() => onAccept(s.recommendation as Decision, s.exclusion_reason)} data-testid="ai-accept"

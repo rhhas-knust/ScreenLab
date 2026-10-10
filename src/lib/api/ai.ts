@@ -24,10 +24,11 @@ export class AiError extends Error {
 
 export const aiKey = (refId: string, stage: Stage) => ['ai', refId, stage] as const;
 
+/** Latest suggestion for this stage; falls back to the other stage's so a review done at one stage still shows at the other. */
 export async function latestSuggestion(referenceId: string, stage: Stage): Promise<AiSuggestion | null> {
-  const rows = must(await supabase.from('ai_suggestions').select('*').eq('reference_id', referenceId).eq('stage', stage)
-    .order('created_at', { ascending: false }).limit(1)) as AiSuggestion[];
-  return rows[0] ?? null;
+  const rows = must(await supabase.from('ai_suggestions').select('*').eq('reference_id', referenceId)
+    .order('created_at', { ascending: false }).limit(20)) as AiSuggestion[];
+  return rows.find((r) => r.stage === stage) ?? rows[0] ?? null;
 }
 
 /** Ask the server-side AI for a suggestion. Never records a decision. */
