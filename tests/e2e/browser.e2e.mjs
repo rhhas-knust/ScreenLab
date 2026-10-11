@@ -648,6 +648,36 @@ try {
   check('ResearchHub: CSV export has one column per question', /Which level are you in\?/.test(rhCsv) && /,400,12,4/.test(rhCsv), rhCsv.split('\n')[1]);
   await shot(page, '30-rh-responses');
 
+  // ResearchHub step B: statistics, AI summary, printable report
+  const rhFields = Object.fromEntries(sql(`select string_agg(type || '=' || id::text, ',' order by field_order) from rh_fields where project_id='${rhId}'`).split(',').map((kv) => kv.split('=')));
+  for (const [lvl, hrs, sc] of [['300', 8, 2], ['400', 20, 5], ['400', 10, 4]]) {
+    sql(`insert into rh_responses(project_id, answers) values ('${rhId}', '${JSON.stringify({ [rhFields.radio]: lvl, [rhFields.number]: hrs, [rhFields.scale]: sc })}'::jsonb)`);
+  }
+  await page.reload();
+  await page.getByTestId('rh-question-stats').first().waitFor();
+  check('ResearchHub: summary shows one card per question', (await page.getByTestId('rh-question-stats').count()) === 3);
+  const numText = await page.getByTestId('rh-numeric-stats').first().textContent();
+  check('ResearchHub: numeric question shows mean and median', /Mean12\.5/.test(numText) && /Median11/.test(numText), numText);
+  check('ResearchHub: choice question shows counts and percentages', await visible(page.getByText('3 · 75%')));
+  await page.getByTestId('rh-ai-write').click();
+  await page.getByTestId('rh-ai-summary').waitFor();
+  check('ResearchHub: AI summary is written server-side and shown', /Test summary of 4 responses/.test(await page.getByTestId('rh-ai-summary').textContent()));
+  check('ResearchHub: AI summary is saved for the owner', sql(`select count(*) from rh_ai_summaries where project_id='${rhId}'`) === '1');
+  await shot(page, '31-rh-summary');
+  await page.getByRole('tab', { name: 'Individual responses' }).click();
+  await page.locator('table tbody tr').nth(3).waitFor({ timeout: 8000 }).catch(() => {});
+  const rhRows = await page.locator('table tbody tr').count();
+  check('ResearchHub: individual responses tab keeps the table', rhRows === 4, `${rhRows} rows`);
+  await page.goto(`${APP}/research/${rhId}/report`);
+  await page.getByTestId('rh-report').waitFor();
+  const rep = await page.getByTestId('rh-report').textContent();
+  check('ResearchHub: report has findings, statistics and the AI summary', /Survey findings report/.test(rep) && /4 responses/.test(rep) && /Test summary of 4 responses/.test(rep) && (await page.getByTestId('rh-question-stats').count()) === 3);
+  check('ResearchHub: report offers Save as PDF', await visible(page.getByTestId('rh-print')));
+  await page.emulateMedia({ media: 'print' });
+  check('ResearchHub: print view hides the toolbar', !(await page.getByTestId('rh-print').isVisible()));
+  await page.emulateMedia({ media: 'screen' });
+  await shot(page, '32-rh-report');
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

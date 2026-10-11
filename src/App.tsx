@@ -24,6 +24,7 @@ import { ResearchListPage } from './research/ResearchListPage';
 import { FormBuilderPage } from './research/FormBuilderPage';
 import { ResponsesPage } from './research/ResponsesPage';
 import { PublicFormPage } from './research/PublicFormPage';
+import { ReportPage } from './research/ReportPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -116,6 +117,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/" element={<Navigate to="/projects" replace />} />
       <Route path="/f/:formId" element={<PublicFormPage />} />
+      <Route path="/research/:formId/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
 
       <Route element={<Shell />}>
         <Route path="/projects" element={<ProjectsPage />} />

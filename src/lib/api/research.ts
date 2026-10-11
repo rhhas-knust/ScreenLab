@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
 import { must } from '../errors';
 
@@ -84,6 +85,7 @@ export const rk = {
   project: (id: string) => ['rh', 'project', id] as const,
   fields: (id: string) => ['rh', 'fields', id] as const,
   responses: (id: string) => ['rh', 'responses', id] as const,
+  summary: (id: string) => ['rh', 'summary', id] as const,
 };
 
 export async function listRhProjects(): Promise<RhProjectSummary[]> {
@@ -163,4 +165,42 @@ export function responsesToCsv(fields: RhField[], responses: RhResponse[]): stri
   const header = ['Response #', 'Submitted at', ...fields.map((f) => f.label)];
   const rows = responses.map((r, i) => [String(i + 1), new Date(r.submitted_at).toISOString(), ...fields.map((f) => answerText(r.answers[f.id]))]);
   return '﻿' + Papa.unparse([header, ...rows]);
+}
+
+export interface RhSummaryBody {
+  headline: string;
+  key_findings: string[];
+  open_text_themes: { theme: string; detail: string }[];
+  limitations: string[];
+}
+export interface RhSummary {
+  id: string;
+  project_id: string;
+  model: string;
+  summary: RhSummaryBody;
+  response_count: number;
+  created_at: string;
+}
+
+export class RhSummaryError extends Error {
+  constructor(message: string, public code?: string) { super(message); }
+}
+
+export async function latestSummary(projectId: string): Promise<RhSummary | null> {
+  const rows = must(await supabase.from('rh_ai_summaries').select('*').eq('project_id', projectId)
+    .order('created_at', { ascending: false }).limit(1)) as RhSummary[];
+  return rows[0] ?? null;
+}
+
+/** Ask the server to write a findings summary. The API key lives only in the Edge Function. */
+export async function writeSummary(projectId: string): Promise<RhSummary> {
+  const { data, error } = await supabase.functions.invoke('rh-summary', { body: { project_id: projectId } });
+  if (error) {
+    if (error instanceof FunctionsHttpError) {
+      const body = await (error.context as Response).json().catch(() => null) as { error?: string; code?: string } | null;
+      throw new RhSummaryError(body?.error ?? 'The AI summary failed.', body?.code);
+    }
+    throw new RhSummaryError('Could not reach the AI service. Check your connection.', 'network');
+  }
+  return data as RhSummary;
 }

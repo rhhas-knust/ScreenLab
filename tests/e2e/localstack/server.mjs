@@ -92,6 +92,29 @@ async function handleAiScreen(req, res, body) {
   return send(res, 200, out);
 }
 
+/**
+ * Stand-in for the rh-summary Edge Function (no model call): same auth + RLS path,
+ * stores a deterministic summary. SL_AI=off simulates a missing API key.
+ */
+async function handleRhSummary(req, res, body) {
+  const claims = claimsFrom(req);
+  if (claims.role !== 'authenticated') return send(res, 401, { error: 'Please sign in again.' });
+  if (process.env.SL_AI === 'off') return send(res, 503, { error: 'AI is not set up yet: add ANTHROPIC_API_KEY under Supabase → Edge Functions → Secrets.', code: 'not_configured' });
+  const { project_id } = JSON.parse(body.toString() || '{}');
+  const out = await asUser(claims, async (c) => {
+    const form = (await c.query('select id, title from rh_projects where id = $1', [project_id])).rows[0];
+    if (!form) return { status: 404, body: { error: 'Questionnaire not found' } };
+    const n = Number((await c.query('select count(*) from rh_responses where project_id = $1', [form.id])).rows[0].count);
+    if (n < 3) return { status: 400, body: { error: 'Collect at least 3 responses before asking for a summary.', code: 'too_few' } };
+    const summary = { headline: `Test summary of ${n} responses to ${form.title}.`, key_findings: [`${n} people responded.`], open_text_themes: [], limitations: ['Small test sample.'] };
+    const row = (await c.query(
+      `insert into rh_ai_summaries(project_id, model, summary, response_count, created_by) values ($1, 'test-model', $2, $3, auth.uid()) returning *`,
+      [form.id, JSON.stringify(summary), n])).rows[0];
+    return { status: 200, body: row };
+  });
+  return send(res, out.status, out.body);
+}
+
 function claimsFrom(req) {
   const auth = req.headers.authorization ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
@@ -491,6 +514,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/rest/v1')) return await handleRest(req, res, url, body);
     if (url.pathname.startsWith('/storage/v1')) return await handleStorage(req, res, url, body);
     if (url.pathname === '/functions/v1/ai-screen') return await handleAiScreen(req, res, body);
+    if (url.pathname === '/functions/v1/rh-summary') return await handleRhSummary(req, res, body);
     return send(res, 404, { message: 'not found' });
   } catch (e) {
     console.error(e);

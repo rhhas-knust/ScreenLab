@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { supabase } from '../../src/lib/supabase';
 import {
   createRhProject, deleteRhProject, getPublicForm, listFields, listResponses, listRhProjects, responsesToCsv, saveFields,
-  submitResponse, updateRhProject, type RhField, type RhProject,
+  latestSummary, submitResponse, updateRhProject, writeSummary, type RhField, type RhProject,
 } from '../../src/lib/api/research';
 
 const PW = process.env.E2E_PASSWORD ?? 'E2e-test-password-1';
@@ -100,6 +100,27 @@ describe('ResearchHub questionnaires', () => {
     expect(field.error).toBeTruthy();
     const del = await supabase.from('rh_responses').delete().eq('project_id', form.id).select('id');
     expect(del.data ?? []).toEqual([]);
+  });
+
+  it('AI summaries: need 3 responses, then only the owner can read or add them', async () => {
+    await signIn(A);
+    await expect(writeSummary(form.id)).rejects.toMatchObject({ code: 'too_few' });
+    await anon();
+    await submitResponse(form.id, { [qName.id]: 'Kojo', [qLevel.id]: '400' });
+    await signIn(A);
+    const s = await writeSummary(form.id);
+    expect(s.response_count).toBe(3);
+    expect((await latestSummary(form.id))?.id).toBe(s.id);
+
+    await signIn(B);
+    expect(await latestSummary(form.id)).toBeNull();
+    await expect(writeSummary(form.id)).rejects.toMatchObject({ message: 'Questionnaire not found' });
+    const forged = await supabase.from('rh_ai_summaries').insert({ project_id: form.id, model: 'x', summary: { headline: 'fake' }, response_count: 0 });
+    expect(forged.error).toBeTruthy();
+    const del = await supabase.from('rh_ai_summaries').delete().eq('project_id', form.id).select('id');
+    expect(del.data ?? []).toEqual([]);
+    await anon();
+    expect((await supabase.from('rh_ai_summaries').select('id').eq('project_id', form.id)).data ?? []).toEqual([]);
   });
 
   it('a closed form shows as closed and rejects new responses', async () => {
