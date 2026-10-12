@@ -710,6 +710,23 @@ try {
   const aiUse = await visible(page.getByTestId('ai-disclosure-text'));
   check('Methods: AI use shows a disclosure paragraph', aiUse && /every inclusion and exclusion decision was made and recorded by a human reviewer/.test(await page.getByTestId('ai-disclosure-text').textContent()));
   await shot(page, '33-methods-ai');
+  await page.goto(`${APP}/p/${projectId}/methods?tab=prospero`);
+  await page.getByTestId('prospero').waitFor();
+  const fieldText = async (key) => page.locator(`[data-testid="prospero-field"][data-key="${key}"]`).textContent();
+  check('PROSPERO: searches drafted from the search log', /PubMed \(searched/.test(await page.getByRole('textbox', { name: 'Searches' }).inputValue()));
+  check('PROSPERO: unknown fields are marked as needing the reviewer', /Needs you/.test(await fieldText('funding')));
+  check('PROSPERO: protocol decisions listed as possible amendments', /Tier 2 studies are in scope/.test(await page.getByTestId('prospero-amendments').textContent()));
+  await page.getByRole('textbox', { name: 'Country' }).fill('Ghana');
+  await page.getByLabel('PROSPERO ID').fill('CRD420260000001');
+  await page.getByTestId('prospero-save').click();
+  await page.getByText('Saved').first().waitFor();
+  check('PROSPERO: answers saved to the project', sql(`select settings->'prospero'->'answers'->>'country' from project_settings where project_id='${projectId}'`) === 'Ghana');
+  await page.reload();
+  await page.getByTestId('prospero').waitFor();
+  check('PROSPERO: saved answers come back as the reviewer\'s text', await page.getByRole('textbox', { name: 'Country' }).inputValue() === 'Ghana' && /Your text/.test(await fieldText('country')));
+  const [prDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('prospero-download').click()]);
+  check('PROSPERO: full draft downloads as text', /Country\nGhana/.test(fs.readFileSync(await prDl.path(), 'utf8')));
+  await shot(page, '35-prospero');
 
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);

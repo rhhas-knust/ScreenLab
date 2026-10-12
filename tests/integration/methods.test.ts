@@ -7,9 +7,10 @@ import { importRecords } from '../../src/lib/api/importer';
 import { DEFAULT_FILTERS, DEFAULT_SORT, fetchMatchingIds, recordDecision } from '../../src/lib/api/references';
 import { askAi } from '../../src/lib/api/ai';
 import {
-  deleteSource, getAiDisclosure, listDecisions, listSources, prismaManual, saveDecision, savePrismaManual, saveSource,
+  deleteSource, getAiDisclosure, listDecisions, listSources, prismaManual, saveDecision, savePrismaManual, saveProspero, saveSource,
 } from '../../src/lib/api/methods';
 import { prismaCounts } from '../../src/lib/methods/prisma';
+import { prosperoSaved } from '../../src/lib/methods/prospero';
 import { parseCsv } from '../../src/lib/import/parsers';
 import type { Project } from '../../src/lib/types';
 
@@ -56,6 +57,14 @@ describe('methods reporting', () => {
     const c = prismaCounts(await getStats(project.id), await listSources(project.id), prismaManual(s));
     expect(c.identified).toBe(66);
     expect(c.fromSearchLog).toBe(true);
+  });
+
+  it('PROSPERO answers are saved alongside the PRISMA numbers', async () => {
+    await saveProspero(project.id, { registration_id: 'CRD420260000001', registered_on: '2026-09-05', answers: { country: 'Ghana' } });
+    const s = await getSettings(project.id);
+    expect(prosperoSaved(s)).toEqual({ registration_id: 'CRD420260000001', registered_on: '2026-09-05', answers: { country: 'Ghana' } });
+    expect(prismaManual(s).duplicates_before_import).toBe(7);
+    expect(s.settings.criteria_terms).toEqual({ include: ['x'] });
   });
 
   it('AI disclosure compares the latest suggestion with the human decision', async () => {

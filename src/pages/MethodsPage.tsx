@@ -5,12 +5,14 @@ import { PrismaTab } from '../methods/PrismaTab';
 import { SearchLog } from '../methods/SearchLog';
 import { DecisionLog } from '../methods/DecisionLog';
 import { AiUse } from '../methods/AiUse';
+import { ProsperoTab } from '../methods/ProsperoTab';
 
 const TABS = [
   { key: 'prisma', label: 'PRISMA diagram' },
   { key: 'search', label: 'Search log' },
   { key: 'decisions', label: 'Decision log' },
   { key: 'ai', label: 'AI use' },
+  { key: 'prospero', label: 'PROSPERO' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
 
@@ -27,7 +29,7 @@ export function MethodsPage() {
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
       <div className="print:hidden">
         <h1 className="text-2xl font-semibold text-ink-900">Methods</h1>
-        <p className="text-sm text-slate-600">Flow diagram, search strategy, protocol decisions and AI use for your methods section.</p>
+        <p className="text-sm text-slate-600">Flow diagram, search strategy, protocol decisions, AI use and PROSPERO registration for your methods section.</p>
       </div>
       <div role="tablist" aria-label="Methods sections" className="flex flex-wrap gap-1 border-b border-slate-200 print:hidden">
         {TABS.map((t) => (
@@ -41,6 +43,7 @@ export function MethodsPage() {
       {tab === 'search' && <SearchLog projectId={projectId} title={title} />}
       {tab === 'decisions' && <DecisionLog projectId={projectId} title={title} />}
       {tab === 'ai' && <AiUse projectId={projectId} />}
+      {tab === 'prospero' && <ProsperoTab projectId={projectId} />}
     </div>
   );
 }

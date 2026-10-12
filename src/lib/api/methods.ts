@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import { supabase } from '../supabase';
 import { must } from '../errors';
 import type { ProjectSettings } from '../types';
+import type { ProsperoSaved } from '../methods/prospero';
 
 export type SourceKind = 'database' | 'register' | 'other';
 export interface SearchSource {
@@ -93,11 +94,13 @@ export function prismaManual(settings: ProjectSettings | undefined): PrismaManua
   };
 }
 
-/** Save the manual PRISMA numbers without touching other keys in settings (criteria terms, PICO…). */
-export async function savePrismaManual(projectId: string, manual: PrismaManual): Promise<void> {
+/** Write one key of project_settings.settings without touching the others (criteria terms, PICO…). */
+async function saveSettingsKey(projectId: string, key: string, value: unknown): Promise<void> {
   const current = must(await supabase.from('project_settings').select('settings').eq('project_id', projectId).single()) as { settings: Record<string, unknown> };
-  must(await supabase.from('project_settings').update({ settings: { ...(current.settings ?? {}), prisma: manual } }).eq('project_id', projectId).select('project_id'));
+  must(await supabase.from('project_settings').update({ settings: { ...(current.settings ?? {}), [key]: value } }).eq('project_id', projectId).select('project_id'));
 }
+export const savePrismaManual = (projectId: string, manual: PrismaManual) => saveSettingsKey(projectId, 'prisma', manual);
+export const saveProspero = (projectId: string, saved: ProsperoSaved) => saveSettingsKey(projectId, 'prospero', saved);
 
 export async function listSources(projectId: string): Promise<SearchSource[]> {
   return must(await supabase.from('search_sources').select('*').eq('project_id', projectId)
