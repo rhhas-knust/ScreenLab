@@ -17,6 +17,7 @@ import { ScreeningPage } from './screening/ScreeningPage';
 import { ReferencesPage } from './pages/ReferencesPage';
 import { DuplicatesPage } from './pages/DuplicatesPage';
 import { StatisticsPage } from './pages/StatisticsPage';
+import { MethodsPage } from './pages/MethodsPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AccountPage } from './pages/AccountPage';
@@ -140,6 +141,7 @@ export default function App() {
           <Route path="references" element={<ReferencesPage />} />
           <Route path="duplicates" element={<DuplicatesPage />} />
           <Route path="statistics" element={<StatisticsPage />} />
+          <Route path="methods" element={<MethodsPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

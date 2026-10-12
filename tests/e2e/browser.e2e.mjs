@@ -678,6 +678,39 @@ try {
   await page.emulateMedia({ media: 'screen' });
   await shot(page, '32-rh-report');
 
+  // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
+  await page.goto(`${APP}/p/${projectId}/methods`);
+  await page.getByTestId('prisma-diagram').locator('svg').waitFor();
+  check('Methods: PRISMA 2020 diagram is drawn from the project', /Records screened/.test(await page.getByTestId('prisma-diagram').textContent()));
+  check('Methods: asks for the databases searched', /Search log/.test(await page.getByTestId('prisma-warnings').textContent()));
+  const [svgDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('prisma-svg').click()]);
+  check('Methods: diagram downloads as SVG', fs.readFileSync(await svgDl.path(), 'utf8').includes('<svg'));
+  await page.getByRole('tab', { name: 'Search log' }).click();
+  await page.getByTestId('source-add').click();
+  await page.getByRole('textbox', { name: 'Name' }).fill('PubMed');
+  await page.getByRole('textbox', { name: 'Records found' }).fill('120');
+  await page.getByRole('textbox', { name: /Search string/ }).fill('("large language model"[tiab]) AND (bias OR fairness)');
+  await page.getByRole('button', { name: 'Save source' }).click();
+  await page.getByTestId('source-row').first().waitFor();
+  check('Methods: search source saved with its query', /PubMed/.test(await page.getByTestId('source-row').first().textContent()) && sql(`select results_count from search_sources where project_id='${projectId}'`) === '120');
+  await page.getByRole('tab', { name: 'PRISMA diagram' }).click();
+  await page.getByTestId('prisma-diagram').locator('svg').waitFor();
+  await page.getByTestId('prisma-diagram').screenshot({ path: path.join(ART, '34-prisma.png') });
+  check('Methods: diagram lists the database with its count', /PubMed \(n\s=\s120\)/.test(await page.getByTestId('prisma-diagram').textContent()));
+  await page.getByRole('tab', { name: 'Decision log' }).click();
+  await page.getByTestId('decision-add').click();
+  await page.getByRole('textbox', { name: 'Decision' }).fill('Tier 2 studies are in scope');
+  await page.getByRole('textbox', { name: 'Why' }).fill('Baseline disparity studies answer the review question.');
+  await page.getByRole('button', { name: 'Save decision' }).click();
+  await page.getByTestId('decision-row').first().waitFor();
+  check('Methods: protocol decision recorded with its reason', /Tier 2 studies are in scope/.test(await page.getByTestId('decision-row').first().textContent()));
+  await page.getByRole('tab', { name: 'AI use' }).click();
+  check('Methods: a project without AI says there is nothing to disclose', await visible(page.getByText('No AI suggestions in this project')));
+  await page.goto(`${APP}/p/${bkId}/methods?tab=ai`);
+  const aiUse = await visible(page.getByTestId('ai-disclosure-text'));
+  check('Methods: AI use shows a disclosure paragraph', aiUse && /every inclusion and exclusion decision was made and recorded by a human reviewer/.test(await page.getByTestId('ai-disclosure-text').textContent()));
+  await shot(page, '33-methods-ai');
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

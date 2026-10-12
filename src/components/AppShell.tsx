@@ -14,6 +14,7 @@ const PROJECT_NAV = [
   { to: 'references', label: 'References' },
   { to: 'duplicates', label: 'Duplicates' },
   { to: 'statistics', label: 'Statistics' },
+  { to: 'methods', label: 'Methods' },
   { to: 'settings', label: 'Settings' },
 ];
 
