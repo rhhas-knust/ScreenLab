@@ -7,6 +7,8 @@ import { LogoMark } from './Logo';
 import { SyncIndicator } from './SyncIndicator';
 import { cx } from './ui';
 import { outbox } from '../lib/outbox';
+import { promptInstall, useInstallOption } from '../lib/install';
+import { useToast } from './Toast';
 
 const PROJECT_NAV = [
   { to: '', label: 'Dashboard', end: true },
@@ -28,6 +30,12 @@ export function AppShell({ children, fullHeight = false }: { children: ReactNode
   const { user } = useAuth();
   const nav = useNavigate();
   const [menu, setMenu] = useState(false);
+  const installOption = useInstallOption();
+  const toast = useToast();
+  const install = async () => {
+    if (installOption === 'ios') toast('In Safari, tap the Share button, then “Add to Home Screen”.');
+    else if (await promptInstall()) toast('ScreenLab is installed. Open it from your home screen or app list.');
+  };
 
   const signOut = async () => {
     if (outbox.getState().pending.length && !window.confirm('Some changes have not reached the server yet. They are kept on this device and will sync the next time you sign in here. Sign out anyway?')) return;
@@ -84,6 +92,11 @@ export function AppShell({ children, fullHeight = false }: { children: ReactNode
                     ))}
                   </div>
                   <div className="border-t border-slate-100">
+                    {installOption && (
+                      <button role="menuitem" type="button" onClick={install} className="block w-full px-3 py-2 text-left text-sm font-medium text-lens-700 hover:bg-slate-50" data-testid="install-app">
+                        Install ScreenLab app
+                      </button>
+                    )}
                     <Link role="menuitem" to="/account" className="block px-3 py-2 text-sm hover:bg-slate-50">Account settings</Link>
                     <button role="menuitem" type="button" onClick={signOut} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">Sign out</button>
                   </div>
