@@ -143,7 +143,7 @@ export function prosperoFields(i: ProsperoInput): ProsperoField[] {
   const strings = i.sources.filter((x) => clean(x.search_string));
   add(M, 'search_strategy', 'Search strategy', 'The full search strategy for at least one database (PROSPERO asks for a link or file).',
     strings.map((x) => `${x.name}:\n${clean(x.search_string)}`).join('\n\n'),
-    strings.length ? { check: 'Paste it, or upload the Search log CSV as the strategy file.' } : { missing: 'Add the search strings in Methods → Search log.' });
+    strings.length ? { check: 'PROSPERO asks for a file: download the Search strategy PDF (Methods → Search log) and upload it.' } : { missing: 'Add the search strings in Methods → Search log.' });
   add(M, 'condition', 'Condition or domain being studied', 'The health condition or topic, in a sentence or two.', '', { missing: 'Describe the topic in your own words.' });
   add(M, 'population', 'Participants / population', 'Who or what is studied, with inclusion and exclusion criteria.', clean(p.population));
   add(M, 'intervention', 'Intervention(s) / exposure(s)', 'What is being tested.', clean(p.intervention_or_exposure));

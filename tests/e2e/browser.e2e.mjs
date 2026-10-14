@@ -727,6 +727,18 @@ try {
   const [prDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('prospero-download').click()]);
   check('PROSPERO: full draft downloads as text', /Country\nGhana/.test(fs.readFileSync(await prDl.path(), 'utf8')));
   await shot(page, '35-prospero');
+  await page.getByTestId('search-strategy-pdf').click();
+  await page.getByTestId('search-strategy-doc').waitFor();
+  check('Search strategy document shows each source with its full query', /\("large language model"\[tiab\]\) AND \(bias OR fairness\)/.test(await page.getByTestId('strategy-string').first().textContent()) && /Total records identified\s*120/.test(await page.getByTestId('search-strategy-doc').textContent()));
+  const stratPdf = await page.pdf({ format: 'A4' });
+  check('Search strategy prints to a PDF', stratPdf.subarray(0, 4).toString() === '%PDF' && stratPdf.length > 5000, `${stratPdf.length} bytes`);
+  await shot(page, '37-search-strategy');
+  await page.goto(`${APP}/p/${projectId}/methods/protocol`);
+  await page.getByTestId('protocol-doc').waitFor();
+  const protoText = await page.getByTestId('protocol-doc').textContent();
+  check('Protocol document uses saved PROSPERO answers and the eligibility criteria', /Ghana/.test(protoText) && /Eligibility criteria/.test(protoText) && /CRD420260000001/.test(protoText));
+  check('Protocol lists what still needs completing', /Named contact/.test(await page.getByTestId('report-missing').textContent()));
+  await shot(page, '38-protocol');
 
   // ---------------------------------------------------------------- Team + data extraction
   const exSeq = sql(`update study_references set title_abstract_decision='include', full_text_decision='include' where id=(select id from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') order by seq limit 1) returning seq`).split('\n')[0].trim();

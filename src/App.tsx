@@ -15,6 +15,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ImportPage } from './pages/ImportPage';
 import { ScreeningPage } from './screening/ScreeningPage';
 import { ExtractionPage } from './pages/ExtractionPage';
+import { ProtocolPage, SearchStrategyPage } from './methods/MethodsReports';
 import { StudyExtraction } from './extraction/StudyExtraction';
 import { ReferencesPage } from './pages/ReferencesPage';
 import { DuplicatesPage } from './pages/DuplicatesPage';
@@ -121,6 +122,8 @@ export default function App() {
       <Route path="/" element={<Navigate to="/projects" replace />} />
       <Route path="/f/:formId" element={<PublicFormPage />} />
       <Route path="/research/:formId/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
+      <Route path="/p/:projectId/methods/search-strategy" element={<RequireAuth><SearchStrategyPage /></RequireAuth>} />
+      <Route path="/p/:projectId/methods/protocol" element={<RequireAuth><ProtocolPage /></RequireAuth>} />
 
       <Route element={<Shell />}>
         <Route path="/projects" element={<ProjectsPage />} />

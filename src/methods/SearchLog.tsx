@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteSource, listSources, mk, saveSource, sourcesToCsv, type SearchSource, type SourceKind } from '../lib/api/methods';
 import { downloadText, safeFileName } from '../lib/export/formats';
@@ -101,6 +102,7 @@ export function SearchLog({ projectId, title }: { projectId: string; title: stri
           <p className="text-sm text-slate-600">One entry per database, register or other source (PRISMA items 6–7). The numbers feed the flow diagram.</p>
         </div>
         <Button variant="secondary" disabled={!rows.length} onClick={() => downloadText(`${safeFileName(title)}_search_strategy.csv`, sourcesToCsv(rows), 'text/csv')}>Download CSV</Button>
+        <Link to={`/p/${projectId}/methods/search-strategy`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50" data-testid="search-strategy-pdf">Search strategy PDF</Link>
         <Button variant="primary" onClick={() => setEditing('new')} disabled={editing === 'new'} data-testid="source-add">+ Add source</Button>
       </div>
 

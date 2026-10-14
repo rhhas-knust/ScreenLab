@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAiDisclosure, listDecisions, listSources, mk, saveProspero, CATEGORY_LABEL } from '../lib/api/methods';
 import {
@@ -118,6 +119,8 @@ export function ProsperoTab({ projectId }: { projectId: string }) {
         </div>
         <Button variant="secondary" onClick={() => downloadText(`${safeFileName(title)}_PROSPERO_draft.txt`, prosperoToText(title, fields, saved), 'text/plain')}
           data-testid="prospero-download">Download all</Button>
+        <Link to={`/p/${projectId}/methods/search-strategy`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50" data-testid="search-strategy-pdf">Search strategy PDF</Link>
+        <Link to={`/p/${projectId}/methods/protocol`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50" data-testid="protocol-pdf">Protocol PDF</Link>
         <Button variant="primary" onClick={save} loading={busy} disabled={!dirty} data-testid="prospero-save">Save</Button>
       </div>
 
