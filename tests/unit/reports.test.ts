@@ -44,28 +44,41 @@ describe('search strategy document', () => {
 
 describe('protocol document', () => {
   const sources = [src('PubMed')];
-  const fields = prosperoFields({ project, stats, sources, decisions: [], ai: null, screeningMode: 'single' });
+  const fields = prosperoFields({ project, stats, sources, decisions: [], ai: null, screeningMode: 'single', dataItems: ['Tier', 'LLMs tested'], duplicatesBeforeImport: 1668 });
+  const item = (d: ReturnType<typeof buildProtocol>, num: string) => d.parts.flatMap((p) => p.items).find((i) => i.num === num)!;
 
-  it('uses saved PROSPERO answers over drafts and lists what is missing', () => {
-    const saved = { ...EMPTY_PROSPERO, registration_id: 'CRD42026000001', answers: { country: 'Ghana', funding: 'None' } };
-    const d = buildProtocol(project, fields, saved, sources, [dec('Tier 2 in scope', 'classification'), dec('Registered', 'registration')]);
-    expect(d.title).toBe('Safety mechanisms in medical LLMs: a systematic review');
-    expect(d.registration).toBe('PROSPERO CRD42026000001');
-    const details = d.sections[0].blocks[0];
-    expect(details.kind === 'fields' && details.rows.find((r) => r.label === 'Country')?.text).toBe('Ghana');
-    expect(d.missing).toContain('Named contact, email and organisation');
-    expect(d.missing).not.toContain('Country');
-    expect(d.missing.some((m) => /Data extraction.*placeholder/.test(m))).toBe(true);
-    const log = d.sections.find((s) => /Decisions/.test(s.heading))!;
-    expect(log.blocks[0].kind === 'table' && log.blocks[0].rows.map((r) => r[2])).toEqual(['Tier 2 in scope. Detail']);
+  it('follows PRISMA-P 2015: three parts, items 1 to 17 in order', () => {
+    const d = buildProtocol(project, fields, EMPTY_PROSPERO, sources, []);
+    expect(d.parts.map((p) => p.heading)).toEqual(['Administrative information', 'Introduction', 'Methods', 'Additional information']);
+    expect(d.parts.slice(0, 3).flatMap((p) => p.items.map((i) => i.num))).toEqual(
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17']);
+    expect(item(d, '1').blocks[0]).toMatchObject({ label: '1a Identification', text: 'Safety mechanisms in medical LLMs: a systematic review: protocol' });
+    expect(item(d, '10').blocks[0]).toMatchObject({ kind: 'code', text: 'PubMed query' });
+    expect(item(d, '12').blocks[0]).toMatchObject({ text: expect.stringContaining('Tier; LLMs tested') });
+    expect(item(d, '11').blocks[0]).toMatchObject({ text: expect.stringContaining('1,668 duplicates removed') });
   });
 
-  it('includes the eligibility lists and the search table', () => {
+  it('uses saved answers over drafts and lists what is missing, including protocol-only items', () => {
+    const saved = { ...EMPTY_PROSPERO, registration_id: 'CRD42026000001', answers: { country: 'Ghana', funding: 'None', confidence: 'GRADE' } };
+    const d = buildProtocol(project, fields, saved, sources, [dec('Tier 2 in scope', 'classification'), dec('Registered', 'registration')]);
+    expect(d.registration).toBe('PROSPERO CRD42026000001');
+    expect(item(d, '2').blocks[0]).toMatchObject({ text: 'Registered with PROSPERO: CRD42026000001.' });
+    const authors = item(d, '3').blocks[0];
+    expect(authors.kind === 'fields' && authors.rows.find((r) => r.label === 'Country')?.text).toBe('Ghana');
+    expect(item(d, '17').blocks[0]).toMatchObject({ text: 'GRADE' });
+    expect(d.missing).toEqual(expect.arrayContaining(['Named contact, email and organisation', 'Rationale (item 6)', 'Meta-bias(es) (item 16)']));
+    expect(d.missing).not.toContain('Country');
+    expect(d.missing).not.toContain('Confidence in cumulative evidence (item 17)');
+    const amend = item(d, '4').blocks[1];
+    expect(amend.kind === 'table' && amend.rows.map((r) => r[2])).toEqual(['Tier 2 in scope. Detail']);
+  });
+
+  it('includes the eligibility lists and the PRISMA-P checklist', () => {
     const d = buildProtocol(project, fields, EMPTY_PROSPERO, sources, []);
-    const elig = d.sections.find((s) => s.heading === 'Eligibility criteria')!;
-    expect(elig.blocks.filter((b) => b.kind === 'list').map((b) => b.kind === 'list' && b.items)).toEqual([['Evaluates an LLM', 'Medical context'], ['Opinion piece', 'Non-English with no translation']]);
-    const search = d.sections.find((s) => /searches/.test(s.heading))!;
-    expect(search.blocks.some((b) => b.kind === 'table' && b.rows[0][0] === 'PubMed')).toBe(true);
-    expect(d.sections.some((s) => /Decisions/.test(s.heading))).toBe(false);
+    const lists = item(d, '8').blocks.filter((b) => b.kind === 'list');
+    expect(lists.map((b) => b.kind === 'list' && b.items)).toEqual([['Evaluates an LLM', 'Medical context'], ['Opinion piece', 'Non-English with no translation']]);
+    expect(item(d, '4').blocks).toHaveLength(1);
+    const checklist = d.parts[3].items.find((i) => /checklist/.test(i.heading))!.blocks[1];
+    expect(checklist.kind === 'table' && checklist.rows).toHaveLength(17);
   });
 });

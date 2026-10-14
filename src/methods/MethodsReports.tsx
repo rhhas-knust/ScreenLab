@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getAiDisclosure, listDecisions, listSources, mk, prismaManual } from '../lib/api/methods';
 import { prosperoFields, prosperoSaved } from '../lib/methods/prospero';
+import { readForm } from '../lib/extraction/form';
 import { buildProtocol, buildSearchStrategy, TO_COMPLETE, type Block } from '../lib/methods/reports';
 import { fmtDate, useProject, useSettings, useStats } from '../lib/hooks';
 import { Alert, Button, cx, PageLoader } from '../components/ui';
@@ -53,7 +54,14 @@ const td = 'border border-slate-400 px-2 py-1 align-top';
 function BlockView({ b }: { b: Block }) {
   switch (b.kind) {
     case 'text':
-      return <p className="whitespace-pre-line"><Marked text={b.text} /></p>;
+      return <p className="whitespace-pre-line">{b.label && <span className="font-semibold">{b.label}: </span>}<Marked text={b.text} /></p>;
+    case 'code':
+      return (
+        <div className="break-inside-avoid">
+          <p className="text-sm font-semibold">{b.title}</p>
+          <pre className="rounded border border-slate-300 bg-slate-50 p-3 font-mono text-[0.8rem] whitespace-pre-wrap"><Marked text={b.text} /></pre>
+        </div>
+      );
     case 'fields':
       return (
         <table className="w-full border-collapse text-sm">
@@ -144,25 +152,34 @@ export function ProtocolPage() {
   const ai = useQuery({ queryKey: mk.ai(projectId), queryFn: () => getAiDisclosure(projectId) });
   if (!project.data || !settings.data || !stats.data || !sources.data || !decisions.data || ai.isLoading) return <PageLoader label="Preparing protocol…" />;
   const saved = prosperoSaved(settings.data);
-  const fields = prosperoFields({ project: project.data, stats: stats.data, sources: sources.data, decisions: decisions.data, ai: ai.data ?? null, screeningMode: settings.data.screening_mode });
+  const fields = prosperoFields({
+    project: project.data, stats: stats.data, sources: sources.data, decisions: decisions.data, ai: ai.data ?? null,
+    screeningMode: settings.data.screening_mode, dataItems: readForm(settings.data)?.fields.map((f) => f.label),
+    duplicatesBeforeImport: prismaManual(settings.data).duplicates_before_import,
+  });
   const doc = buildProtocol(project.data, fields, saved, sources.data, decisions.data);
 
   return (
     <ReportFrame projectId={projectId} back="?tab=prospero" docTitle={`${project.data.title} — protocol`} missing={doc.missing} testid="protocol-doc">
       <header className="space-y-1 border-b border-slate-300 pb-3">
-        <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Systematic review protocol</p>
+        <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Systematic review protocol · PRISMA-P 2015</p>
         <h1 className="text-2xl font-semibold"><Marked text={doc.title} /></h1>
         {doc.registration && <p>{doc.registration}</p>}
         <p className="text-sm text-slate-600">Version of {fmtDate(new Date().toISOString(), false)}</p>
       </header>
-      {doc.sections.map((s, i) => (
-        <section key={s.heading} className="space-y-2">
-          <h2 className="text-lg font-semibold">{i + 1}. {s.heading}</h2>
-          {s.blocks.map((b, j) => <BlockView key={j} b={b} />)}
+      {doc.parts.map((part) => (
+        <section key={part.heading} className="space-y-4">
+          <h2 className="border-b border-slate-300 pb-1 text-xl font-semibold">{part.heading}</h2>
+          {part.items.map((it) => (
+            <div key={it.heading} className="space-y-2" data-testid="protocol-item">
+              <h3 className="text-base font-semibold">{it.num && `${it.num}. `}{it.heading}</h3>
+              {it.blocks.map((b, j) => <BlockView key={j} b={b} />)}
+            </div>
+          ))}
         </section>
       ))}
       <p className="text-xs text-slate-500 print:hidden">
-        Built from Methods → PROSPERO (your saved answers, or ScreenLab’s drafts), the protocol fields in Settings, the search log and the decision log. Edit the answers there, then come back here.
+        Follows PRISMA-P 2015. Built from Methods → PROSPERO (your saved answers, or ScreenLab’s drafts, including the protocol-only items), the protocol fields in Settings, the search log and the decision log. Edit the answers there, then come back here.
       </p>
     </ReportFrame>
   );

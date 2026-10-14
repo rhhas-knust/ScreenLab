@@ -22,7 +22,14 @@ export interface ProsperoInput {
   decisions: ProtocolDecision[];
   ai: AiDisclosure | null;
   screeningMode: 'single' | 'dual';
+  /** Optional: labels of the extraction form's fields, for the PRISMA-P data items. */
+  dataItems?: string[];
+  /** Optional: duplicates removed before records reached ScreenLab. */
+  duplicatesBeforeImport?: number;
 }
+
+/** Fields PRISMA-P asks for that PROSPERO does not; used only for the protocol document. */
+export const PROTOCOL_ONLY = 'Protocol only (PRISMA-P items not on the PROSPERO form)';
 
 export interface ProsperoField {
   key: string;
@@ -172,6 +179,23 @@ export function prosperoFields(i: ProsperoInput): ProsperoField[] {
   add(G, 'country', 'Country', 'Where the review is carried out.', '', { missing: 'Your country.' });
   add(G, 'keywords', 'Keywords', 'Words to help others find the record.', '', { missing: 'A few keywords, e.g. large language models; bias; health equity.' });
   add(G, 'dissemination', 'Dissemination plans', 'Where you plan to publish or present.', '', { missing: 'e.g. thesis, journal article.' });
+
+  // PRISMA-P only
+  const P = PROTOCOL_ONLY;
+  add(P, 'rationale', 'Rationale (item 6)', 'Why the review is needed, in the context of what is already known.', '', { missing: 'Two or three short paragraphs with key references.' });
+  add(P, 'contributions', 'Contributions of authors (item 3b)', 'What each author does, and the guarantor.', '', { missing: 'e.g. who designed the search, screened, extracts, appraises, and the guarantor.' });
+  add(P, 'sponsor', 'Sponsor (item 5b)', 'The sponsor, or "None".', '', { missing: 'Write "None" if there is no sponsor.' });
+  add(P, 'funder_role', 'Role of funder or sponsor (item 5c)', 'Their role in developing the protocol, if any.', '', { missing: 'e.g. "The funder had no role in developing this protocol."' });
+  const dups = i.duplicatesBeforeImport ?? 0;
+  add(P, 'data_management', 'Data management (item 11a)', 'How records and data are managed through the review.',
+    `Records will be ${dups ? `combined and de-duplicated before import (${dups.toLocaleString('en-US')} duplicates removed), then ` : ''}managed in ScreenLab, which stores every record, screening decision (with timestamp and change history), exclusion reason, full-text PDF and extraction; project backups can be exported at any time.`,
+    { check: 'Name any reference manager you also used (e.g. Rayyan, EndNote, Zotero).' });
+  add(P, 'data_items', 'Data items (item 12)', 'The variables extracted, and any assumptions or simplifications.',
+    i.dataItems?.length ? `Data to be extracted: ${i.dataItems.join('; ')}. Data not reported will be recorded as "not reported".` : '',
+    i.dataItems?.length ? { check: 'Taken from your extraction form.' } : { missing: 'Set up the extraction form (Extraction page) and this fills itself in.' });
+  add(P, 'outcome_priority', 'Outcomes and prioritisation (item 13)', 'Which outcome is primary and which are secondary, with their rationale.', '', { missing: 'Name the primary outcome and any secondary outcomes.' });
+  add(P, 'meta_bias', 'Meta-bias(es) (item 16)', 'How publication bias and selective reporting will be assessed.', '', { missing: 'e.g. compare reported outcomes with methods; funnel plot only if 10+ studies are pooled.' });
+  add(P, 'confidence', 'Confidence in cumulative evidence (item 17)', 'How the certainty of the evidence will be judged.', '', { missing: 'e.g. GRADE, or a narrative assessment.' });
   return f;
 }
 
@@ -207,7 +231,7 @@ export const answerFor = (field: ProsperoField, saved: ProsperoSaved) => saved.a
 export function prosperoToText(title: string, fields: ProsperoField[], saved: ProsperoSaved): string {
   const out = [`PROSPERO draft: ${title}`, ''];
   let section = '';
-  for (const fl of fields) {
+  for (const fl of fields.filter((x) => x.section !== PROTOCOL_ONLY)) {
     if (fl.section !== section) { section = fl.section; out.push(`== ${section.toUpperCase()} ==`, ''); }
     out.push(fl.label, answerFor(fl, saved) || '[to complete]', '');
   }

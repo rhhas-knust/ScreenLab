@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAiDisclosure, listDecisions, listSources, mk, saveProspero, CATEGORY_LABEL } from '../lib/api/methods';
+import { getAiDisclosure, listDecisions, listSources, mk, prismaManual, saveProspero, CATEGORY_LABEL } from '../lib/api/methods';
+import { readForm } from '../lib/extraction/form';
 import {
-  amendments, amendmentText, answerFor, day, prosperoFields, prosperoSaved, prosperoToText,
+  amendments, amendmentText, answerFor, PROTOCOL_ONLY, day, prosperoFields, prosperoSaved, prosperoToText,
   type ProsperoField, type ProsperoSaved,
 } from '../lib/methods/prospero';
 import { downloadText, safeFileName } from '../lib/export/formats';
@@ -68,6 +69,8 @@ export function ProsperoTab({ projectId }: { projectId: string }) {
     ? prosperoFields({
       project: project.data, stats: stats.data, sources: sources.data, decisions: decisions.data,
       ai: ai.data ?? null, screeningMode: settings.data.screening_mode,
+      dataItems: readForm(settings.data)?.fields.map((f) => f.label),
+      duplicatesBeforeImport: prismaManual(settings.data).duplicates_before_import,
     })
     : null), [project.data, stats.data, sources.data, decisions.data, settings.data, ai.data]);
 
@@ -179,6 +182,9 @@ export function ProsperoTab({ projectId }: { projectId: string }) {
       {sections.map((s) => (
         <section key={s} className="space-y-3">
           <h3 className="pt-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">{s}</h3>
+          {s === PROTOCOL_ONLY && (
+            <p className="text-sm text-slate-600">These are not on the PROSPERO form, but the protocol PDF needs them to cover every PRISMA-P item.</p>
+          )}
           {fields.filter((f) => f.section === s).map((f) => (
             <FieldCard key={f.key} f={f} value={answerFor(f, saved)} status={status(f)} edited={isEdited(f)}
               onChange={(v) => setAnswer(f, v)}

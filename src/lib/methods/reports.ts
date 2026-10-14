@@ -44,18 +44,44 @@ export function buildSearchStrategy(sources: SearchSource[], duplicatesBeforeImp
 }
 
 export type Block =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; label?: string }
   | { kind: 'fields'; rows: { label: string; text: string }[] }
   | { kind: 'list'; title: string; items: string[] }
-  | { kind: 'table'; head: string[]; rows: string[][] };
+  | { kind: 'table'; head: string[]; rows: string[][] }
+  | { kind: 'code'; title: string; text: string };
+export interface ProtocolItem { num: string; heading: string; blocks: Block[] }
 export interface ProtocolDoc {
   title: string;
   registration: string;
-  sections: { heading: string; blocks: Block[] }[];
+  parts: { heading: string; items: ProtocolItem[] }[];
   missing: string[];
 }
 
-/** The protocol, section by section, from the PROSPERO answers (or their drafts) and the project record. */
+/** PRISMA-P 2015 checklist (Moher et al., Syst Rev 2015;4:1): item, topic, where it is reported. */
+export const PRISMA_P: [string, string, string][] = [
+  ['Administrative information', '1a / 1b', 'Title: identification; update'],
+  ['Administrative information', '2', 'Registration'],
+  ['Administrative information', '3a / 3b', 'Authors: contact; contributions'],
+  ['Administrative information', '4', 'Amendments'],
+  ['Administrative information', '5a–5c', 'Support: sources; sponsor; role of sponsor or funder'],
+  ['Introduction', '6', 'Rationale'],
+  ['Introduction', '7', 'Objectives'],
+  ['Methods', '8', 'Eligibility criteria'],
+  ['Methods', '9', 'Information sources'],
+  ['Methods', '10', 'Search strategy'],
+  ['Methods', '11a–11c', 'Study records: data management; selection process; data collection process'],
+  ['Methods', '12', 'Data items'],
+  ['Methods', '13', 'Outcomes and prioritisation'],
+  ['Methods', '14', 'Risk of bias in individual studies'],
+  ['Methods', '15a–15d', 'Data synthesis'],
+  ['Methods', '16', 'Meta-bias(es)'],
+  ['Methods', '17', 'Confidence in cumulative evidence'],
+];
+
+/**
+ * The protocol in PRISMA-P 2015 order (items 1–17), from the PROSPERO answers (or their
+ * drafts), the protocol-only answers, the project record, the search log and the decision log.
+ */
 export function buildProtocol(project: Project, fields: ProsperoField[], saved: ProsperoSaved, sources: SearchSource[], decisions: ProtocolDecision[]): ProtocolDoc {
   const missing: string[] = [];
   const val = (key: string) => {
@@ -70,55 +96,87 @@ export function buildProtocol(project: Project, fields: ProsperoField[], saved: 
     const f = fields.find((x) => x.key === key);
     return f ? answerFor(f, saved).trim() : '';
   };
-  const row = (key: string) => ({ label: fields.find((x) => x.key === key)?.label ?? key, text: val(key) });
+  const label = (key: string) => fields.find((x) => x.key === key)?.label.replace(/ \(item [^)]*\)$/, '') ?? key;
+  const row = (key: string, as?: string) => ({ label: as ?? label(key), text: val(key) });
+  const text = (key: string, as?: string): Block => ({ kind: 'text', label: as, text: val(key) });
   const strategy = buildSearchStrategy(sources, 0);
-
-  const sections: ProtocolDoc['sections'] = [
-    {
-      heading: 'Review details',
-      blocks: [{ kind: 'fields', rows: [row('review_type'), row('start_date'), row('end_date'), row('contact'), row('team'), row('funding'), row('conflicts'), row('country')] }],
-    },
-    { heading: 'Review question', blocks: [{ kind: 'text', text: val('question') }, { kind: 'fields', rows: [row('condition')] }] },
-    {
-      heading: 'Eligibility criteria',
-      blocks: [
-        { kind: 'fields', rows: [row('population'), row('intervention'), row('comparator'), row('main_outcomes'), row('other_outcomes'), row('study_types'), ...(optional('context') ? [row('context')] : []), row('language')] },
-        ...(lines(project.inclusion_criteria).length ? [{ kind: 'list' as const, title: 'Inclusion criteria', items: lines(project.inclusion_criteria) }] : []),
-        ...(lines(project.exclusion_criteria).length ? [{ kind: 'list' as const, title: 'Exclusion criteria', items: lines(project.exclusion_criteria) }] : []),
-      ],
-    },
-    {
-      heading: 'Information sources and searches',
-      blocks: [
-        { kind: 'text', text: val('searches') },
-        ...(sources.length ? [{
-          kind: 'table' as const,
-          head: ['Source', 'Date searched', 'Limits', 'Records'],
-          rows: [...strategy.rows.map((r) => [r.name, r.date, r.limits, r.records]), ...(strategy.total != null ? [['Total', '', '', num(strategy.total)]] : [])],
-        }] : []),
-        { kind: 'text', text: 'The full search strategy for each source is provided in the separate search strategy document.' },
-      ],
-    },
-    { heading: 'Study selection and data extraction', blocks: [{ kind: 'text', text: val('extraction') }] },
-    { heading: 'Risk of bias (quality) assessment', blocks: [{ kind: 'text', text: val('risk_of_bias') }] },
-    { heading: 'Data synthesis', blocks: [{ kind: 'text', text: val('synthesis') }, { kind: 'fields', rows: [row('subgroups')] }] },
-  ];
   const logged = decisions.filter((d) => d.category !== 'registration');
-  if (logged.length) {
-    sections.push({
-      heading: 'Decisions and changes recorded during the review',
-      blocks: [{
-        kind: 'table', head: ['Date', 'Type', 'Decision', 'Reason'],
+
+  const admin: ProtocolItem[] = [
+    { num: '1', heading: 'Title', blocks: [
+      { kind: 'text', label: '1a Identification', text: `${val('title')}: protocol` },
+      { kind: 'text', label: '1b Update', text: 'This is a new review, not an update of a previous review.' },
+    ] },
+    { num: '2', heading: 'Registration', blocks: [{ kind: 'text', text: saved.registration_id ? `Registered with PROSPERO: ${saved.registration_id}.` : 'To be registered with PROSPERO; registration number to be added once assigned.' }] },
+    { num: '3', heading: 'Authors', blocks: [
+      { kind: 'fields', rows: [row('contact', '3a Contact'), row('team', 'Review team'), row('start_date', 'Start date'), row('end_date', 'Anticipated completion'), row('country', 'Country')] },
+      text('contributions', '3b Contributions'),
+    ] },
+    { num: '4', heading: 'Amendments', blocks: [
+      { kind: 'text', text: 'Important amendments will be recorded with the date, a description and the reason in the decision log, reported to PROSPERO, and listed in the final review.' },
+      ...(logged.length ? [{
+        kind: 'table' as const, head: ['Date', 'Type', 'Decision', 'Reason'],
         rows: logged.map((d) => [day(d.decided_on), CATEGORY_LABEL[d.category], [d.title, d.detail?.trim()].filter(Boolean).join('. '), d.rationale?.trim() ?? '']),
-      }],
-    });
-  }
-  sections.push({ heading: 'Stage of review, dissemination and keywords', blocks: [{ kind: 'fields', rows: [row('stage'), row('dissemination'), row('keywords')] }] });
+      }] : []),
+    ] },
+    { num: '5', heading: 'Support', blocks: [{ kind: 'fields', rows: [row('funding', '5a Sources'), row('sponsor', '5b Sponsor'), row('funder_role', '5c Role of sponsor or funder'), row('conflicts', 'Conflicts of interest')] }] },
+  ];
+
+  const intro: ProtocolItem[] = [
+    { num: '6', heading: 'Rationale', blocks: [text('rationale')] },
+    { num: '7', heading: 'Objectives', blocks: [
+      text('question', 'Review question'),
+      { kind: 'fields', rows: [row('population', 'Population'), row('intervention', 'Intervention / exposure'), row('comparator', 'Comparator'), row('main_outcomes', 'Outcomes')] },
+    ] },
+  ];
+
+  const methods: ProtocolItem[] = [
+    { num: '8', heading: 'Eligibility criteria', blocks: [
+      { kind: 'fields', rows: [row('study_types', 'Study designs'), ...(optional('context') ? [row('context', 'Context')] : []), row('language', 'Language'), ...(project.date_range ? [{ label: 'Publication dates', text: project.date_range }] : [])] },
+      ...(lines(project.inclusion_criteria).length ? [{ kind: 'list' as const, title: 'Inclusion criteria', items: lines(project.inclusion_criteria) }] : []),
+      ...(lines(project.exclusion_criteria).length ? [{ kind: 'list' as const, title: 'Exclusion criteria', items: lines(project.exclusion_criteria) }] : []),
+    ] },
+    { num: '9', heading: 'Information sources', blocks: [
+      text('searches'),
+      ...(sources.length ? [{
+        kind: 'table' as const, head: ['Source', 'Date searched', 'Limits', 'Records'],
+        rows: [...strategy.rows.map((r) => [r.name, r.date, r.limits, r.records]), ...(strategy.total != null ? [['Total', '', '', num(strategy.total)]] : [])],
+      }] : []),
+    ] },
+    { num: '10', heading: 'Search strategy', blocks: strategy.details.length
+      ? strategy.details.map((d) => ({ kind: 'code' as const, title: `${d.name} (searched ${d.date}; limits: ${d.limits})`, text: d.strategy }))
+      : [{ kind: 'text', text: TO_COMPLETE }] },
+    { num: '11', heading: 'Study records', blocks: [
+      text('data_management', '11a Data management'),
+      text('extraction', '11b–11c Selection and data collection process'),
+    ] },
+    { num: '12', heading: 'Data items', blocks: [text('data_items')] },
+    { num: '13', heading: 'Outcomes and prioritisation', blocks: [
+      { kind: 'fields', rows: [row('main_outcomes', 'Main outcome(s)'), row('other_outcomes', 'Additional outcome(s)'), row('outcome_priority', 'Prioritisation')] },
+    ] },
+    { num: '14', heading: 'Risk of bias in individual studies', blocks: [text('risk_of_bias')] },
+    { num: '15', heading: 'Data synthesis', blocks: [text('synthesis'), { kind: 'fields', rows: [row('subgroups', 'Additional analyses (subgroups, sensitivity)')] }] },
+    { num: '16', heading: 'Meta-bias(es)', blocks: [text('meta_bias')] },
+    { num: '17', heading: 'Confidence in cumulative evidence', blocks: [text('confidence')] },
+  ];
+
+  const extra: ProtocolItem[] = [
+    { num: '', heading: 'Stage of review, dissemination and keywords', blocks: [{ kind: 'fields', rows: [row('stage', 'Stage of review'), row('dissemination', 'Dissemination'), row('keywords', 'Keywords')] }] },
+    { num: '', heading: 'PRISMA-P 2015 checklist', blocks: [
+      { kind: 'text', text: 'Each item is reported under the heading with the same number. Moher D, Shamseer L, Clarke M, et al. Preferred reporting items for systematic review and meta-analysis protocols (PRISMA-P) 2015 statement. Syst Rev. 2015;4:1.' },
+      { kind: 'table', head: ['Section', 'Item', 'Topic'], rows: PRISMA_P.map(([a, b, c]) => [a, b, c]) },
+    ] },
+  ];
 
   return {
     title: val('title'),
     registration: saved.registration_id ? `PROSPERO ${saved.registration_id}` : '',
-    sections,
+    parts: [
+      { heading: 'Administrative information', items: admin },
+      { heading: 'Introduction', items: intro },
+      { heading: 'Methods', items: methods },
+      { heading: 'Additional information', items: extra },
+    ],
     missing: [...new Set([...missing, ...strategy.missing])],
   };
 }
