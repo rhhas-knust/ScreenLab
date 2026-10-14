@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { TeamSection } from '../components/TeamSection';
 import { deleteProject, logActivity, updateProject, updateSettings } from '../lib/api/projects';
 import { createReason, createTag, deleteReason, deleteTag, TAG_COLORS, updateReason, updateTag } from '../lib/api/tags';
 import { friendlyError } from '../lib/errors';
@@ -16,7 +17,7 @@ import { CriteriaKeywordsEditor } from '../components/CriteriaKeywords';
 import { PicoKeywordsEditor } from '../components/Pico';
 
 const SECTIONS = [
-  ['account', 'Account'], ['project', 'Project settings'], ['pico', 'PICO keywords'], ['criteria', 'Criteria keywords'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
+  ['account', 'Account'], ['project', 'Project settings'], ['team', 'Review team'], ['pico', 'PICO keywords'], ['criteria', 'Criteria keywords'], ['screening', 'Screening settings'], ['shortcuts', 'Keyboard shortcuts'],
   ['reasons', 'Exclusion reasons'], ['tags', 'Tags'], ['export', 'Data export & backup'], ['delete', 'Delete project'], ['about', 'About ScreenLab'],
 ] as const;
 
@@ -183,6 +184,7 @@ export function SettingsPage() {
             }
           }} />
         </Section>
+        <Section id="team" title="Review team"><TeamSection projectId={projectId} ownerId={project.owner_id} /></Section>
         <Section id="pico" title="PICO keywords"><PicoKeywordsEditor project={project} settings={settings} /></Section>
         <Section id="criteria" title="Criteria keywords"><CriteriaKeywordsEditor project={project} settings={settings} /></Section>
         <Section id="screening" title="Screening settings">

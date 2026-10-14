@@ -14,6 +14,8 @@ import { NewProjectPage } from './pages/NewProjectPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ImportPage } from './pages/ImportPage';
 import { ScreeningPage } from './screening/ScreeningPage';
+import { ExtractionPage } from './pages/ExtractionPage';
+import { StudyExtraction } from './extraction/StudyExtraction';
 import { ReferencesPage } from './pages/ReferencesPage';
 import { DuplicatesPage } from './pages/DuplicatesPage';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -142,6 +144,8 @@ export default function App() {
           <Route path="duplicates" element={<DuplicatesPage />} />
           <Route path="statistics" element={<StatisticsPage />} />
           <Route path="methods" element={<MethodsPage />} />
+          <Route path="extraction" element={<ExtractionPage />} />
+          <Route path="extraction/:refId" element={<StudyExtraction />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

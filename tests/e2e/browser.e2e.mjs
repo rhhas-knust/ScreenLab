@@ -728,6 +728,41 @@ try {
   check('PROSPERO: full draft downloads as text', /Country\nGhana/.test(fs.readFileSync(await prDl.path(), 'utf8')));
   await shot(page, '35-prospero');
 
+  // ---------------------------------------------------------------- Team + data extraction
+  const exSeq = sql(`update study_references set title_abstract_decision='include', full_text_decision='include' where id=(select id from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') order by seq limit 1) returning seq`).split('\n')[0].trim();
+  await page.goto(`${APP}/p/${projectId}/settings#team`);
+  await page.getByLabel(/Add a co-reviewer by email/).fill('nobody@screenlab.test');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  check('Team: adding an email without an account explains what to do', await visible(page.getByText(/Ask them to sign up first/)));
+  await page.getByLabel(/Add a co-reviewer by email/).fill('e2e-b@screenlab.test');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByTestId('team-member').nth(1).waitFor();
+  check('Team: owner adds a co-reviewer by email', /e2e-b@screenlab\.test/.test(await page.getByTestId('team').textContent()));
+  await page.goto(`${APP}/p/${projectId}/extraction`);
+  await page.getByTestId('preset-llm-equity').click();
+  await page.getByText('Extraction form ready').first().waitFor();
+  await page.getByRole('tab', { name: 'Studies' }).click();
+  await page.getByTestId('extraction-row').filter({ hasText: `#${exSeq}` }).click();
+  await page.getByTestId('extraction-title').waitFor();
+  await page.getByRole('combobox', { name: 'Tier', exact: true }).selectOption('Tier 1');
+  await page.getByRole('textbox', { name: 'LLMs tested' }).fill('GPT-4o (May 2024)');
+  await page.getByRole('checkbox', { name: 'Language' }).check();
+  await page.getByTestId('extraction-complete').click();
+  await page.getByTestId('finalise').waitFor();
+  check('Extraction: own answers saved as complete', sql(`select status || ':' || (data->>'tier') || ':' || (data->'factors'->>0) from extractions where project_id='${projectId}'`) === 'complete:Tier 1:Language');
+  check('Extraction: offers to finalise from a single extraction', /Only one completed extraction/.test(await page.getByTestId('finalise').textContent()));
+  await page.getByTestId('final-save').click();
+  await page.getByText('Final extraction saved').first().waitFor();
+  check('Extraction: final version stored with its tier', sql(`select data->>'tier' from extraction_final where project_id='${projectId}'`) === 'Tier 1');
+  await shot(page, '36-extraction');
+  await page.goto(`${APP}/p/${projectId}/extraction?tab=agreement`);
+  await page.getByTestId('agreement').waitFor();
+  const [t1Dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('table1-download').click()]);
+  check('Extraction: characteristics table downloads with the final answers', /Tier 1/.test(fs.readFileSync(await t1Dl.path(), 'utf8')) && /GPT-4o \(May 2024\)/.test(fs.readFileSync(await t1Dl.path(), 'utf8')));
+  await page.goto(`${APP}/p/${projectId}/methods`);
+  await page.getByTestId('prisma-diagram').locator('svg').waitFor();
+  check('PRISMA: included studies split by agreed tier', /Tier 1 \(n\s=\s1\)/.test(await page.getByTestId('prisma-diagram').textContent()));
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

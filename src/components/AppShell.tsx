@@ -13,6 +13,7 @@ import { useToast } from './Toast';
 const PROJECT_NAV = [
   { to: '', label: 'Dashboard', end: true },
   { to: 'screening', label: 'Screening' },
+  { to: 'extraction', label: 'Extraction' },
   { to: 'references', label: 'References' },
   { to: 'duplicates', label: 'Duplicates' },
   { to: 'statistics', label: 'Statistics' },

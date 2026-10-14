@@ -41,7 +41,7 @@ function BoxEl({ b, x, y, h }: { b: Box; x: number; y: number; h: number }) {
 const arrowDown = (x: number, y1: number, y2: number) => <line x1={x} y1={y1} x2={x} y2={y2 - 2} stroke="#1f2937" strokeWidth="1.5" markerEnd="url(#prisma-arrow)" />;
 const arrowRight = (y: number) => <line x1={MAIN_X + BOX_W} y1={y} x2={SIDE_X - 2} y2={y} stroke="#1f2937" strokeWidth="1.5" markerEnd="url(#prisma-arrow)" />;
 
-export const PrismaDiagram = forwardRef<SVGSVGElement, { c: PrismaCounts; title?: string }>(function PrismaDiagram({ c, title }, ref) {
+export const PrismaDiagram = forwardRef<SVGSVGElement, { c: PrismaCounts; title?: string; tiers?: { name: string; n: number }[] | null }>(function PrismaDiagram({ c, title, tiers }, ref) {
   const idLines = [
     'Records identified from*:',
     ...c.databases.map((d) => `${d.name} ${n(d.n)}`),
@@ -71,7 +71,8 @@ export const PrismaDiagram = forwardRef<SVGSVGElement, { c: PrismaCounts; title?
       },
     );
   }
-  rows.push({ phase: 'Included', main: box(`Studies included in review\n${n(c.included)}\nReports of included studies\n${n(c.reportsOfIncluded)}`) });
+  const tierLines = (tiers ?? []).filter((t) => t.n > 0).map((t) => `\u2003${t.name} ${n(t.n)}`);
+  rows.push({ phase: 'Included', main: box([`Studies included in review ${n(c.included)}`, ...tierLines, `Reports of included studies ${n(c.reportsOfIncluded)}`].join('\n')) });
 
   const top = title ? 44 : 16;
   let y = top;

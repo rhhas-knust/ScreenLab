@@ -95,7 +95,7 @@ export function prismaManual(settings: ProjectSettings | undefined): PrismaManua
 }
 
 /** Write one key of project_settings.settings without touching the others (criteria terms, PICO…). */
-async function saveSettingsKey(projectId: string, key: string, value: unknown): Promise<void> {
+export async function saveSettingsKey(projectId: string, key: string, value: unknown): Promise<void> {
   const current = must(await supabase.from('project_settings').select('settings').eq('project_id', projectId).single()) as { settings: Record<string, unknown> };
   must(await supabase.from('project_settings').update({ settings: { ...(current.settings ?? {}), [key]: value } }).eq('project_id', projectId).select('project_id'));
 }

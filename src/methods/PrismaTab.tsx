@@ -8,6 +8,8 @@ import { qk, useSettings, useStats } from '../lib/hooks';
 import { Alert, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { PrismaDiagram, svgMarkup, svgToPng } from './PrismaDiagram';
+import { getProgress, xk } from '../lib/api/extraction';
+import { readForm, tierCounts } from '../lib/extraction/form';
 
 const FIELDS: { key: keyof PrismaManual; label: string; hint: string }[] = [
   { key: 'duplicates_before_import', label: 'Duplicates removed before import', hint: 'e.g. removed in Rayyan, EndNote or Zotero before the records reached ScreenLab' },
@@ -23,6 +25,7 @@ export function PrismaTab({ projectId, title }: { projectId: string; title: stri
   const stats = useStats(projectId);
   const settings = useSettings(projectId);
   const sources = useQuery({ queryKey: mk.sources(projectId), queryFn: () => listSources(projectId) });
+  const progress = useQuery({ queryKey: xk.progress(projectId), queryFn: () => getProgress(projectId) });
   const [manual, setManual] = useState<PrismaManual | null>(null);
   const [saving, setSaving] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -32,7 +35,15 @@ export function PrismaTab({ projectId, title }: { projectId: string; title: stri
     () => (stats.data && sources.data && manual ? prismaCounts(stats.data, sources.data, manual) : null),
     [stats.data, sources.data, manual],
   );
+  const tiers = useMemo(
+    () => tierCounts(readForm(settings.data), (progress.data ?? []).map((p) => (p.has_final ? p.final_tier : null))),
+    [settings.data, progress.data],
+  );
   if (!counts || !manual) return <div className="p-6"><Spinner /></div>;
+  const unassigned = tiers?.find((t) => t.name === 'Tier not yet assigned')?.n ?? 0;
+  const warnings = unassigned
+    ? [...counts.warnings, `${unassigned} included stud${unassigned === 1 ? 'y has' : 'ies have'} no agreed Tier yet. Finalise their extraction (Extraction page) to split the included box by tier.`]
+    : counts.warnings;
 
   const save = async () => {
     setSaving(true);
@@ -74,15 +85,15 @@ export function PrismaTab({ projectId, title }: { projectId: string; title: stri
         <Button variant="ghost" onClick={() => window.print()}>Print</Button>
       </div>
 
-      {counts.warnings.length > 0 && (
+      {warnings.length > 0 && (
         <Alert kind="warning" className="print:hidden">
-          <ul className="list-disc space-y-0.5 pl-4" data-testid="prisma-warnings">{counts.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+          <ul className="list-disc space-y-0.5 pl-4" data-testid="prisma-warnings">{warnings.map((w) => <li key={w}>{w}</li>)}</ul>
         </Alert>
       )}
 
       <Card className="overflow-x-auto p-3" >
         <div className="min-w-[40rem]" data-testid="prisma-diagram">
-          <PrismaDiagram ref={svgRef} c={counts} />
+          <PrismaDiagram ref={svgRef} c={counts} tiers={tiers?.some((t) => t.n > 0 && t.name !== 'Tier not yet assigned') ? tiers : null} />
         </div>
       </Card>
 
