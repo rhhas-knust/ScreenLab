@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getAll, listTeam, studyDetails, xk, type ProgressRow } from '../lib/api/extraction';
 import {
@@ -12,6 +14,7 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
   const M = MODULES[kind];
   const all = useQuery({ queryKey: xk.all(projectId, kind), queryFn: () => getAll(projectId, kind) });
   const team = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
+  const [agreedOnly, setAgreedOnly] = useState(true);
   if (!all.data) return <div className="p-6"><Spinner /></div>;
 
   const byRef = new Map<string, ExtractionData[]>();
@@ -23,10 +26,12 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
     : tierCounts(form, progress.map((p) => (p.has_final ? p.final_tier : null)));
   const finals = new Map(all.data.finals.map((f) => [f.reference_id, f.data]));
   const base = safeFileName(title);
+  const agreedCount = progress.filter((p) => finals.has(p.reference_id)).length;
 
   const downloadTable = async () => {
-    const details = new Map((await studyDetails(progress.map((p) => p.reference_id))).map((d) => [d.id, d]));
-    const rows = progress.map((p) => ({ study: details.get(p.reference_id)!, data: finals.get(p.reference_id) ?? null })).filter((r) => r.study);
+    const chosen = agreedOnly ? progress.filter((p) => finals.has(p.reference_id)) : progress;
+    const details = new Map((await studyDetails(chosen.map((p) => p.reference_id))).map((d) => [d.id, d]));
+    const rows = chosen.map((p) => ({ study: details.get(p.reference_id)!, data: finals.get(p.reference_id) ?? null })).filter((r) => r.study);
     downloadText(kind === 'rob' ? `${base}_risk_of_bias.csv` : `${base}_characteristics_of_included_studies.csv`, characteristicsCsv(form, rows), 'text/csv');
   };
   const downloadAll = () => {
@@ -80,9 +85,14 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
       <Card className="space-y-2 p-4">
         <h3 className="text-sm font-semibold text-ink-900">Export</h3>
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={downloadTable} data-testid="table1-download">{kind === 'rob' ? 'Risk-of-bias table (CSV)' : 'Characteristics table (CSV)'}</Button>
+          <Button variant="primary" onClick={downloadTable} disabled={agreedOnly && agreedCount === 0} data-testid="table1-download">{kind === 'rob' ? 'Risk-of-bias table (CSV)' : 'Characteristics table (CSV)'}</Button>
           <Button variant="secondary" onClick={downloadAll}>Every reviewer’s {M.noun} (CSV)</Button>
+          <Link to={`/p/${projectId}/pilot-report${kind === 'rob' ? '?kind=rob' : ''}`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50" data-testid="pilot-report-link">Pilot report</Link>
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={agreedOnly} onChange={(e) => setAgreedOnly(e.target.checked)} data-testid="agreed-only" />
+          Only studies with an agreed {M.noun} ({agreedCount} of {progress.length})
+        </label>
         <p className="text-xs text-slate-500">The table uses the final agreed {M.noun}; studies without one have empty cells. CSV files open in Excel and Google Sheets.</p>
       </Card>
     </div>

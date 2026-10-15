@@ -6,6 +6,7 @@ import { plotColumns, robSummary, robTone, trafficLight } from '../../src/lib/ex
 import { optionCounts, PRESETS, readForm, ROB_PRESETS, type ExtractionForm } from '../../src/lib/extraction/form';
 import { methodsDraft, methodsText } from '../../src/lib/methods/methodsDraft';
 import { checklistCsv, checklistProgress, PRISMA_2020, readChecklist } from '../../src/lib/methods/prisma2020';
+import { buildPilot } from '../../src/lib/extraction/pilot';
 import type { Project, ProjectStats } from '../../src/lib/types';
 
 const form: ExtractionForm = {
@@ -144,5 +145,36 @@ describe('PRISMA 2020 checklist', () => {
     expect(checklistProgress(where)).toBe(2);
     const rows = Papa.parse<string[]>(checklistCsv(where).replace(/^﻿/, '')).data;
     expect(rows[1]).toEqual(['Title', 'Title', '1', 'Identify the report as a systematic review.', 'Title page']);
+  });
+});
+
+describe('pilot report', () => {
+  const pf: ExtractionForm = {
+    fields: [
+      { key: 'tier', label: 'Tier', type: 'choice', options: ['Tier 1', 'Tier 2'] },
+      { key: 'llms', label: 'LLMs tested', type: 'text' },
+      { key: 'n', label: 'Sample size', type: 'number' },
+    ],
+  };
+  it('puts each reviewer side by side, marks differences and ranks the hardest fields', () => {
+    const p = buildPilot(pf, [
+      { seq: 9, label: 'B', title: null, final: null, entries: [{ reviewer: 'me', data: { tier: 'Tier 2', llms: 'GPT-4o', n: '10' } }] },
+      { seq: 3, label: 'A', title: null, final: { tier: 'Tier 1', llms: 'GPT-4o' }, entries: [
+        { reviewer: 'me', data: { tier: 'Tier 1', llms: 'gpt-4o ', n: '120' } },
+        { reviewer: 'nana', data: { tier: 'Tier 2', llms: 'GPT-4o', n: '120.0' } }] },
+      { seq: 5, label: 'C', title: null, final: null, entries: [] },
+    ]);
+    expect(p.studies.map((s) => s.seq)).toEqual([3, 9]);
+    expect(p.reviewers).toEqual(['me', 'nana']);
+    const a = p.studies[0];
+    expect(a.rows.map((r) => [r.key, r.values, r.final, r.differ])).toEqual([
+      ['tier', ['Tier 1', 'Tier 2'], 'Tier 1', true],
+      ['llms', ['gpt-4o ', 'GPT-4o'], 'GPT-4o', false],
+      ['n', ['120', '120.0'], '', false],
+    ]);
+    expect(a.differences).toBe(1);
+    expect(p.studies[1].rows.every((r) => !r.differ)).toBe(true);
+    expect([p.agreement.studies, p.agreement.cells, p.agreement.agreedCells]).toEqual([1, 3, 2]);
+    expect(p.hardest.map((f) => f.key)).toEqual(['tier']);
   });
 });

@@ -771,6 +771,17 @@ try {
   await page.getByTestId('agreement').waitFor();
   const [t1Dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('table1-download').click()]);
   check('Extraction: characteristics table downloads with the final answers', /Tier 1/.test(fs.readFileSync(await t1Dl.path(), 'utf8')) && /GPT-4o \(May 2024\)/.test(fs.readFileSync(await t1Dl.path(), 'utf8')));
+  check('Extraction: table lists only studies with an agreed extraction by default', fs.readFileSync(await t1Dl.path(), 'utf8').trim().split('\n').length === 2);
+  await page.getByTestId('pilot-report-link').click();
+  await page.getByTestId('pilot-report').waitFor();
+  check('Pilot report: lists each piloted study with the reviewers and agreed answers', (await page.getByTestId('pilot-study').count()) === 1 && /GPT-4o \(May 2024\)/.test(await page.getByTestId('pilot-report').textContent()));
+  const [pilotDoc] = await Promise.all([page.waitForEvent('download'), page.getByTestId('pilot-word').click()]);
+  check('Pilot report: downloads for Word', /Agreement by field/.test(fs.readFileSync(await pilotDoc.path(), 'utf8')));
+  await page.getByRole('textbox', { name: 'Pilot notes' }).fill('Clarified the LLM version field.');
+  await page.getByTestId('pilot-notes-save').click();
+  await page.getByText('Notes saved').first().waitFor();
+  check('Pilot report: notes saved', sql(`select settings->'pilot_notes'->>'extraction' from project_settings where project_id='${projectId}'`) === 'Clarified the LLM version field.');
+  await shot(page, '42-pilot-report');
   await page.goto(`${APP}/p/${projectId}/methods`);
   await page.getByTestId('prisma-diagram').locator('svg').waitFor();
   check('PRISMA: included studies split by agreed tier', /Tier 1 \(n\s=\s1\)/.test(await page.getByTestId('prisma-diagram').textContent()));
