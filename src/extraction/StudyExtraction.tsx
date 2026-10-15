@@ -7,7 +7,7 @@ import {
 import { getReference } from '../lib/api/references';
 import { listFiles, signedPdfUrl } from '../lib/api/fulltext';
 import {
-  display, isEmpty, mergeForFinal, readForm, sameValue, studyLabel, type ExtractionData, type ExtractionForm, type Value,
+  display, isEmpty, mergeForFinal, MODULES, readForm, sameValue, studyLabel, type ExtractionData, type ExtractionForm, type ModuleKind, type Value,
 } from '../lib/extraction/form';
 import { friendlyError } from '../lib/errors';
 import { useSettings } from '../lib/hooks';
@@ -51,8 +51,8 @@ function PaperPanel({ referenceId }: { referenceId: string }) {
 }
 
 /** Side-by-side comparison of completed extractions, and the agreed final version. */
-function Finalise({ projectId, referenceId, form, sources, existing, names, onSaved }: {
-  projectId: string; referenceId: string; form: ExtractionForm; sources: Extraction[];
+function Finalise({ kind, projectId, referenceId, form, sources, existing, names, onSaved }: {
+  kind: ModuleKind; projectId: string; referenceId: string; form: ExtractionForm; sources: Extraction[];
   existing: ExtractionData | null; names: (id: string) => string; onSaved: () => void;
 }) {
   const toast = useToast();
@@ -65,18 +65,18 @@ function Finalise({ projectId, referenceId, form, sources, existing, names, onSa
 
   const save = async () => {
     setBusy(true);
-    try { await saveFinal(projectId, referenceId, data); toast('Final extraction saved'); onSaved(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); } finally { setBusy(false); }
+    try { await saveFinal(projectId, referenceId, data, kind); toast(`Final ${MODULES[kind].noun} saved`); onSaved(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); } finally { setBusy(false); }
   };
   return (
     <Card className="space-y-3 p-4">
       <div data-testid="finalise">
-        <h3 className="font-semibold text-ink-900">{b ? 'Compare and agree the final extraction' : 'Final extraction'}</h3>
+        <h3 className="font-semibold text-ink-900">{b ? `Compare and agree the final ${MODULES[kind].noun}` : `Final ${MODULES[kind].noun}`}</h3>
         <p className="text-sm text-slate-600">
           {b
             ? conflicts.length
               ? `${conflicts.length} field${conflicts.length === 1 ? '' : 's'} differ between ${names(a.reviewer_id)} and ${names(b.reviewer_id)}. Agreed values are filled in; discuss the rest and choose.`
-              : 'Both extractions agree on every field.'
-            : 'Only one completed extraction so far. You can finalise from it, or wait for your co-reviewer.'}
+              : `Both ${MODULES[kind].noun}s agree on every field.`
+            : `Only one completed ${MODULES[kind].noun} so far. You can finalise from it, or wait for your co-reviewer.`}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -107,20 +107,21 @@ function Finalise({ projectId, referenceId, form, sources, existing, names, onSa
           </tbody>
         </table>
       </div>
-      <Button variant="primary" onClick={save} loading={busy} data-testid="final-save">Save final extraction</Button>
+      <Button variant="primary" onClick={save} loading={busy} data-testid="final-save">Save final {MODULES[kind].noun}</Button>
     </Card>
   );
 }
 
-export function StudyExtraction() {
+export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) {
+  const M = MODULES[kind];
   const { projectId = '', refId = '' } = useParams();
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
   const settings = useSettings(projectId);
-  const form = readForm(settings.data);
-  const q = useQuery({ queryKey: xk.reference(refId), queryFn: () => getForReference(refId) });
-  const progress = useQuery({ queryKey: xk.progress(projectId), queryFn: () => getProgress(projectId) });
+  const form = readForm(settings.data, kind);
+  const q = useQuery({ queryKey: xk.reference(refId, kind), queryFn: () => getForReference(refId, kind) });
+  const progress = useQuery({ queryKey: xk.progress(projectId, kind), queryFn: () => getProgress(projectId, kind) });
   const team = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
   const [data, setData] = useState<ExtractionData | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -131,7 +132,7 @@ export function StudyExtraction() {
 
   if (!settings.data || !q.data || data === null) return <PageLoader />;
   if (!form) {
-    return <div className="mx-auto max-w-3xl p-6"><EmptyState title="No extraction form yet" action={<Link className="underline" to={`/p/${projectId}/extraction?tab=form`}>Set up the form</Link>}>Choose or build the form first.</EmptyState></div>;
+    return <div className="mx-auto max-w-3xl p-6"><EmptyState title={`No ${M.noun} form yet`} action={<Link className="underline" to={`/p/${projectId}/${M.path}?tab=form`}>Set up the form</Link>}>Choose or build the form first.</EmptyState></div>;
   }
   const { mine, others, final, me } = q.data;
   const names = (id: string) => (id === me ? 'You' : team.data?.find((t) => t.user_id === id)?.email ?? 'Co-reviewer');
@@ -147,39 +148,39 @@ export function StudyExtraction() {
   const save = async (status: 'draft' | 'complete') => {
     setBusy(status);
     try {
-      await saveExtraction(projectId, refId, data, status);
+      await saveExtraction(projectId, refId, data, status, kind);
       setDirty(false);
-      await Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId) }), qc.invalidateQueries({ queryKey: xk.progress(projectId) })]);
-      toast(status === 'complete' ? 'Extraction marked complete' : 'Draft saved');
+      await Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId, kind) }), qc.invalidateQueries({ queryKey: xk.progress(projectId, kind) })]);
+      toast(status === 'complete' ? `${M.noun[0].toUpperCase()}${M.noun.slice(1)} marked complete` : 'Draft saved');
     } catch (e) {
       toast(friendlyError(e), { kind: 'error' });
     } finally {
       setBusy(null);
     }
   };
-  const refreshAll = () => Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId) }), qc.invalidateQueries({ queryKey: xk.progress(projectId) }), qc.invalidateQueries({ queryKey: ['prisma-tiers', projectId] })]);
+  const refreshAll = () => Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId, kind) }), qc.invalidateQueries({ queryKey: xk.progress(projectId, kind) })]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center gap-2">
-        <Link to={`/p/${projectId}/extraction`} className="text-sm text-ink-800 underline">← All included studies</Link>
+        <Link to={`/p/${projectId}/${M.path}`} className="text-sm text-ink-800 underline">← All included studies</Link>
         <span className="flex-1" />
         {idx >= 0 && <span className="text-sm text-slate-500">Study {idx + 1} of {rows.length}</span>}
-        {nextTodo && <Button size="sm" variant="secondary" onClick={() => nav(`/p/${projectId}/extraction/${nextTodo.reference_id}`)} disabled={dirty}>Next to do →</Button>}
+        {nextTodo && <Button size="sm" variant="secondary" onClick={() => nav(`/p/${projectId}/${M.path}/${nextTodo.reference_id}`)} disabled={dirty}>Next to do →</Button>}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
           <PaperPanel referenceId={refId} />
-          {final && <Alert kind="success">The final extraction for this study has been agreed.</Alert>}
+          {final && <Alert kind="success">The final {M.noun} for this study has been agreed.</Alert>}
           {!iAmComplete && others.length > 0 && (
-            <Alert kind="info">{others.length === 1 ? 'Another reviewer has' : `${others.length} reviewers have`} started this study. Their answers stay hidden until you mark yours complete, so the two extractions are independent.</Alert>
+            <Alert kind="info">{others.length === 1 ? 'Another reviewer has' : `${others.length} reviewers have`} started this study. Their answers stay hidden until you mark yours complete, so the two {M.noun}s are independent.</Alert>
           )}
         </div>
 
         <Card className="space-y-4 p-4">
           <div className="flex items-center gap-2" data-testid="extraction-form">
-            <h3 className="flex-1 font-semibold text-ink-900">Your extraction</h3>
+            <h3 className="flex-1 font-semibold text-ink-900">Your {M.noun}</h3>
             <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium', iAmComplete ? 'bg-emerald-50 text-emerald-800' : mine ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-slate-600')} data-testid="my-status">
               {iAmComplete ? 'Complete' : mine ? 'Draft' : 'Not started'}
             </span>
@@ -202,15 +203,15 @@ export function StudyExtraction() {
       </div>
 
       {sources.length > 0 && (
-        <Finalise key={`${final?.updated_at ?? 'new'}-${sources.map((s) => s.updated_at).join()}`} projectId={projectId} referenceId={refId} form={form}
+        <Finalise kind={kind} key={`${final?.updated_at ?? 'new'}-${sources.map((s) => s.updated_at).join()}`} projectId={projectId} referenceId={refId} form={form}
           sources={sources} existing={final?.data ?? null} names={names} onSaved={refreshAll} />
       )}
       {final && (
         <div className="text-right">
           <Button size="sm" variant="ghost" onClick={async () => {
-            if (!window.confirm('Remove the agreed final extraction for this study? The reviewers’ own extractions are kept.')) return;
-            try { await deleteFinal(refId); await refreshAll(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); }
-          }}>Remove final extraction</Button>
+            if (!window.confirm(`Remove the agreed final ${M.noun} for this study? The reviewers’ own answers are kept.`)) return;
+            try { await deleteFinal(refId, kind); await refreshAll(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); }
+          }}>Remove final {M.noun}</Button>
         </div>
       )}
     </div>

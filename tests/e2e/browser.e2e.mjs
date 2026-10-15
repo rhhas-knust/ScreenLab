@@ -775,6 +775,62 @@ try {
   await page.getByTestId('prisma-diagram').locator('svg').waitFor();
   check('PRISMA: included studies split by agreed tier', /Tier 1 \(n\s=\s1\)/.test(await page.getByTestId('prisma-diagram').textContent()));
 
+  // ---------------------------------------------------------------- Risk of bias, synthesis, GRADE, methods draft, PRISMA 2020
+  await page.goto(`${APP}/p/${projectId}/risk-of-bias`);
+  await page.getByTestId('preset-jbi-llm').click();
+  await page.getByText('Risk of bias form ready').first().waitFor();
+  await page.getByRole('tab', { name: 'Studies' }).click();
+  await page.getByTestId('extraction-row').filter({ hasText: `#${exSeq}` }).click();
+  await page.getByTestId('extraction-title').waitFor();
+  check('Risk of bias: own extraction does not count as an appraisal', /Not started/.test(await page.getByTestId('my-status').textContent()));
+  await page.getByRole('combobox', { name: /^Q1\./ }).selectOption('Yes');
+  await page.getByRole('combobox', { name: /^Q7\./ }).selectOption('Unclear');
+  await page.getByRole('combobox', { name: 'Overall risk of bias' }).selectOption('Low');
+  await page.getByTestId('extraction-complete').click();
+  await page.getByTestId('finalise').waitFor();
+  await page.getByTestId('final-save').click();
+  await page.getByText('Final appraisal saved').first().waitFor();
+  check('Risk of bias: agreed appraisal stored separately from the extraction',
+    sql(`select data->>'overall' from extraction_final where project_id='${projectId}' and kind='rob'`) === 'Low'
+    && sql(`select data->>'tier' from extraction_final where project_id='${projectId}' and kind='extraction'`) === 'Tier 1');
+  await page.goto(`${APP}/p/${projectId}/risk-of-bias?tab=plot`);
+  await page.getByTestId('rob-plot').waitFor();
+  check('Risk of bias: traffic-light plot draws one dot per item and the overall judgement', (await page.getByTestId('rob-plot').locator('svg').first().locator('circle').count()) >= 10);
+  const [robSvg] = await Promise.all([page.waitForEvent('download'), page.getByTestId('rob-svg').click()]);
+  check('Risk of bias: plot downloads as SVG', fs.readFileSync(await robSvg.path(), 'utf8').includes('<svg'));
+  await shot(page, '39-rob-plot');
+
+  await page.goto(`${APP}/p/${projectId}/synthesis`);
+  await page.getByTestId('evidence-group').first().waitFor();
+  check('Synthesis: evidence table grouped by tier', /Tier: Tier 1 · 1 study/.test(await page.getByTestId('evidence-group').first().textContent()));
+  const [evDoc] = await Promise.all([page.waitForEvent('download'), page.getByTestId('evidence-word').click()]);
+  check('Synthesis: evidence table downloads for Word', /GPT-4o \(May 2024\)/.test(fs.readFileSync(await evDoc.path(), 'utf8')));
+  await page.getByRole('tab', { name: 'Cross-tabulation' }).click();
+  check('Synthesis: cross-tabulation of two fields', await visible(page.getByTestId('crosstab')));
+  await page.getByRole('tab', { name: 'GRADE summary of findings' }).click();
+  await page.getByTestId('grade-add').click();
+  await page.getByRole('textbox', { name: 'Outcome' }).fill('Disparity in output by language');
+  await page.getByRole('combobox', { name: 'Imprecision' }).selectOption('Serious');
+  check('GRADE: certainty drops one level per serious concern', (await page.getByTestId('grade-certainty').textContent()) === 'Very low');
+  await page.getByTestId('grade-save').click();
+  await page.getByText('GRADE table saved').first().waitFor();
+  check('GRADE: outcome saved', sql(`select settings->'grade'->'rows'->0->>'imprecision' from project_settings where project_id='${projectId}'`) === 'Serious');
+  await shot(page, '40-grade');
+
+  await page.goto(`${APP}/p/${projectId}/methods?tab=draft`);
+  await page.getByTestId('methods-draft').waitFor();
+  const draft = await page.getByRole('textbox', { name: 'Methods draft' }).inputValue();
+  check('Methods draft: written from the project (search, risk-of-bias tool, GRADE)', /PubMed/.test(draft) && /adapted JBI checklist/.test(draft) && /1 main outcome was assessed with the GRADE approach/.test(draft));
+  await page.getByTestId('methods-save').click();
+  await page.getByText('Draft saved').first().waitFor();
+  check('Methods draft: edits saved', sql(`select (settings->'methods_draft'->>'text') is not null from project_settings where project_id='${projectId}'`) === 't');
+  await page.getByRole('tab', { name: 'PRISMA 2020 checklist' }).click();
+  await page.getByLabel('Where item 1 is reported').fill('Title page');
+  await page.getByTestId('prisma2020-save').click();
+  await page.getByText('Checklist saved').first().waitFor();
+  check('PRISMA 2020 checklist: locations saved', sql(`select settings->'prisma2020'->>'1' from project_settings where project_id='${projectId}'`) === 'Title page');
+  await shot(page, '41-prisma2020');
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

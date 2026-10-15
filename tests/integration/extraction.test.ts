@@ -8,7 +8,7 @@ import { DEFAULT_FILTERS, DEFAULT_SORT, fetchMatchingIds, recordDecision } from 
 import {
   addMember, getForReference, getProgress, listTeam, removeMember, saveExtraction, saveFinal, saveForm,
 } from '../../src/lib/api/extraction';
-import { PRESETS } from '../../src/lib/extraction/form';
+import { PRESETS, ROB_PRESETS } from '../../src/lib/extraction/form';
 import { parseCsv } from '../../src/lib/import/parsers';
 import type { Project } from '../../src/lib/types';
 
@@ -102,6 +102,26 @@ describe('blinded double extraction', () => {
     await saveFinal(project.id, ref1, { tier: 'Tier 1', llms: 'GPT-4o' });
     const row = (await getProgress(project.id)).find((r) => r.reference_id === ref1)!;
     expect([row.has_final, row.final_tier, row.complete_count]).toEqual([true, 'Tier 1', 2]);
+  });
+
+  it('risk-of-bias appraisals are blinded separately from extraction', async () => {
+    await signIn(A);
+    await saveForm(project.id, ROB_PRESETS[0].form, 'rob');
+    await saveExtraction(project.id, ref1, { q1: 'Yes', overall: 'Low' }, 'complete', 'rob');
+    expect((await getForReference(ref1)).mine?.data.tier).toBe('Tier 1');
+    await signIn(B);
+    // B completed the extraction of ref1, but not the appraisal: A's appraisal stays hidden
+    const view = await getForReference(ref1, 'rob');
+    expect([view.mine, view.others]).toEqual([null, []]);
+    expect((await getProgress(project.id, 'rob')).find((r) => r.reference_id === ref1)).toMatchObject({ my_status: null, complete_count: 1, has_final: false });
+    await saveExtraction(project.id, ref1, { q1: 'No', overall: 'High' }, 'complete', 'rob');
+    expect((await getForReference(ref1, 'rob')).others.map((o) => o.data.overall)).toEqual(['Low']);
+    await saveFinal(project.id, ref1, { q1: 'Yes', overall: 'Moderate' }, 'rob');
+    const row = (await getProgress(project.id, 'rob')).find((r) => r.reference_id === ref1)!;
+    expect([row.has_final, row.final_overall, row.final_tier]).toEqual([true, 'Moderate', null]);
+    // the extraction final is untouched
+    expect((await getProgress(project.id)).find((r) => r.reference_id === ref1)?.final_tier).toBe('Tier 1');
+    await signIn(A);
   });
 
   it('a removed reviewer loses access to the project', async () => {

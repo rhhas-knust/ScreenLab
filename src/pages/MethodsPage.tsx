@@ -6,6 +6,8 @@ import { SearchLog } from '../methods/SearchLog';
 import { DecisionLog } from '../methods/DecisionLog';
 import { AiUse } from '../methods/AiUse';
 import { ProsperoTab } from '../methods/ProsperoTab';
+import { MethodsDraft } from '../methods/MethodsDraft';
+import { Prisma2020Tab } from '../methods/Prisma2020Tab';
 
 const TABS = [
   { key: 'prisma', label: 'PRISMA diagram' },
@@ -13,6 +15,8 @@ const TABS = [
   { key: 'decisions', label: 'Decision log' },
   { key: 'ai', label: 'AI use' },
   { key: 'prospero', label: 'PROSPERO' },
+  { key: 'draft', label: 'Draft methods' },
+  { key: 'checklist', label: 'PRISMA 2020 checklist' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
 
@@ -44,6 +48,8 @@ export function MethodsPage() {
       {tab === 'decisions' && <DecisionLog projectId={projectId} title={title} />}
       {tab === 'ai' && <AiUse projectId={projectId} />}
       {tab === 'prospero' && <ProsperoTab projectId={projectId} />}
+      {tab === 'draft' && <MethodsDraft projectId={projectId} title={title} />}
+      {tab === 'checklist' && <Prisma2020Tab projectId={projectId} title={title} />}
     </div>
   );
 }

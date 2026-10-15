@@ -12,7 +12,7 @@ export interface FormField {
   options?: string[];
   help?: string;
 }
-export interface ExtractionForm { fields: FormField[] }
+export interface ExtractionForm { fields: FormField[]; /** Name of the preset it started from, e.g. the appraisal tool. */ name?: string }
 export type Value = string | string[];
 export type ExtractionData = Record<string, Value>;
 
@@ -21,6 +21,18 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
 };
 /** The field PRISMA uses to split the included studies. */
 export const TIER_KEY = 'tier';
+/** The risk-of-bias field holding the overall judgement. */
+export const OVERALL_KEY = 'overall';
+
+/** Data extraction and risk-of-bias appraisal share one engine (blinding, comparison, agreed final). */
+export type ModuleKind = 'extraction' | 'rob';
+export const MODULES: Record<ModuleKind, { title: string; path: string; settingsKey: string; noun: string; summaryKey: string }> = {
+  extraction: { title: 'Data extraction', path: 'extraction', settingsKey: 'extraction_form', noun: 'extraction', summaryKey: TIER_KEY },
+  rob: { title: 'Risk of bias', path: 'risk-of-bias', settingsKey: 'rob_form', noun: 'appraisal', summaryKey: OVERALL_KEY },
+};
+
+const JBI = ['Yes', 'No', 'Unclear', 'Not applicable'];
+const ROB_LEVELS = ['Low', 'Moderate', 'High'];
 
 const f = (key: string, label: string, type: FieldType, extra: Partial<FormField> = {}): FormField => ({ key, label, type, ...extra });
 
@@ -72,9 +84,52 @@ export const PRESETS: { id: string; name: string; description: string; form: Ext
   },
 ];
 
+export const ROB_PRESETS: typeof PRESETS = [
+  {
+    id: 'jbi-llm',
+    name: 'Adapted JBI checklist for LLM evaluation studies',
+    description: 'JBI Critical Appraisal Checklist for Analytical Cross-Sectional Studies, adapted for studies that evaluate LLM outputs. Answers: Yes, No, Unclear, Not applicable.',
+    form: {
+      fields: [
+        f('q1', 'Q1. Were the prompts, cases or vignettes clearly defined, and was their selection described?', 'choice', { options: JBI }),
+        f('q2', 'Q2. Were the model(s), version(s) and settings (e.g. temperature, date of access) reported?', 'choice', { options: JBI }),
+        f('q3', 'Q3. Was the demographic, language or cultural variation (or the safety mechanism) applied validly and consistently?', 'choice', { options: JBI }),
+        f('q4', 'Q4. Were objective, standard criteria used to judge the outputs?', 'choice', { options: JBI }),
+        f('q5', 'Q5. Were factors that could distort comparisons (e.g. prompt wording, order) identified?', 'choice', { options: JBI }),
+        f('q6', 'Q6. Were strategies to deal with those factors stated (e.g. matched prompts, randomisation)?', 'choice', { options: JBI }),
+        f('q7', 'Q7. Were outputs measured validly and reliably (e.g. blinded or multiple raters)?', 'choice', { options: JBI }),
+        f('q8', 'Q8. Were repeated runs performed, or output variability accounted for?', 'choice', { options: JBI }),
+        f('q9', 'Q9. Was appropriate statistical analysis used?', 'choice', { options: JBI }),
+        f(OVERALL_KEY, 'Overall risk of bias', 'choice', { options: ROB_LEVELS, help: 'Your overall judgement for this study, based on the answers above.' }),
+        f('rob_notes', 'Reasons for the judgement', 'long'),
+      ],
+    },
+  },
+  {
+    id: 'jbi-cross-sectional',
+    name: 'JBI checklist for analytical cross-sectional studies',
+    description: 'The standard 8-item JBI checklist, unchanged.',
+    form: {
+      fields: [
+        f('q1', 'Q1. Were the criteria for inclusion in the sample clearly defined?', 'choice', { options: JBI }),
+        f('q2', 'Q2. Were the study subjects and the setting described in detail?', 'choice', { options: JBI }),
+        f('q3', 'Q3. Was the exposure measured in a valid and reliable way?', 'choice', { options: JBI }),
+        f('q4', 'Q4. Were objective, standard criteria used for measurement of the condition?', 'choice', { options: JBI }),
+        f('q5', 'Q5. Were confounding factors identified?', 'choice', { options: JBI }),
+        f('q6', 'Q6. Were strategies to deal with confounding factors stated?', 'choice', { options: JBI }),
+        f('q7', 'Q7. Were the outcomes measured in a valid and reliable way?', 'choice', { options: JBI }),
+        f('q8', 'Q8. Was appropriate statistical analysis used?', 'choice', { options: JBI }),
+        f(OVERALL_KEY, 'Overall risk of bias', 'choice', { options: ROB_LEVELS }),
+        f('rob_notes', 'Reasons for the judgement', 'long'),
+      ],
+    },
+  },
+];
+export const presetsFor = (kind: ModuleKind) => (kind === 'rob' ? ROB_PRESETS : PRESETS);
+
 /** Read the form from settings, dropping anything malformed. */
-export function readForm(settings: { settings?: Record<string, unknown> } | undefined): ExtractionForm | null {
-  const raw = settings?.settings?.extraction_form as { fields?: unknown } | undefined;
+export function readForm(settings: { settings?: Record<string, unknown> } | undefined, kind: ModuleKind = 'extraction'): ExtractionForm | null {
+  const raw = settings?.settings?.[MODULES[kind].settingsKey] as { fields?: unknown } | undefined;
   if (!raw || !Array.isArray(raw.fields)) return null;
   const seen = new Set<string>();
   const fields: FormField[] = [];
@@ -88,7 +143,7 @@ export function readForm(settings: { settings?: Record<string, unknown> } | unde
       ...(typeof x.help === 'string' && x.help ? { help: x.help } : {}),
     });
   }
-  return { fields };
+  return { fields, ...(typeof (raw as { name?: unknown }).name === 'string' ? { name: (raw as { name: string }).name } : {}) };
 }
 
 /** A key for a new field, unique within the form. */
@@ -189,6 +244,19 @@ export function allExtractionsCsv(form: ExtractionForm, rows: { seq: number; rev
     ['ID', 'Reviewer', 'Status', ...form.fields.map((x) => x.label)],
     ...rows.map((r) => [`#${r.seq}`, r.reviewer, r.status, ...form.fields.map((x) => display(r.data[x.key]))]),
   ]);
+}
+
+/** Counts of a one-choice field's agreed values, in the form's option order. */
+export function optionCounts(form: ExtractionForm | null, key: string, values: (string | null)[], noneLabel: string, suffix = ''): { name: string; n: number }[] | null {
+  const field = form?.fields.find((x) => x.key === key);
+  if (!field || !values.length) return null;
+  const opts = field.options ?? [];
+  const out = opts.map((o) => ({ name: `${o}${suffix}`, n: values.filter((t) => t === o).length }));
+  const other = values.filter((t) => t && !opts.includes(t)).length;
+  if (other) out.push({ name: 'Other', n: other });
+  const none = values.filter((t) => !t).length;
+  if (none) out.push({ name: noneLabel, n: none });
+  return out;
 }
 
 /** Tier counts for the PRISMA "included" box, in the form's option order. */

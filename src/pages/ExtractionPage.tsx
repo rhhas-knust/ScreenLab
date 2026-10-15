@@ -2,17 +2,23 @@ import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getProgress, listTeam, xk, type ProgressRow } from '../lib/api/extraction';
-import { readForm, studyLabel } from '../lib/extraction/form';
+import { MODULES, readForm, studyLabel, type ModuleKind } from '../lib/extraction/form';
 import { useProject, useSettings } from '../lib/hooks';
 import { cx, EmptyState, PageLoader, Stat } from '../components/ui';
 import { FormEditor } from '../extraction/FormEditor';
 import { AgreementTab } from '../extraction/AgreementTab';
+import { RobPlotTab } from '../extraction/RobPlot';
 
-const TABS = [
+const TABS: { key: 'studies' | 'form' | 'agreement' | 'plot'; label: string; only?: ModuleKind }[] = [
   { key: 'studies', label: 'Studies' },
   { key: 'form', label: 'Form' },
   { key: 'agreement', label: 'Agreement & export' },
-] as const;
+  { key: 'plot', label: 'Traffic-light plot', only: 'rob' },
+];
+const INTRO: Record<ModuleKind, string> = {
+  extraction: 'Each reviewer extracts every included study on their own; answers stay hidden from the other reviewer until both are complete. Then you compare, agree the final version, and export the characteristics table.',
+  rob: 'Each reviewer appraises every included study on their own with the same checklist; answers stay hidden until both are complete. Then you compare, agree the final judgement, and export the risk-of-bias table and traffic-light plot.',
+};
 type Filter = 'all' | 'todo' | 'compare' | 'final';
 
 function stateOf(r: ProgressRow, reviewers: number): { key: Exclude<Filter, 'all'> | 'waiting'; text: string; cls: string } {
@@ -22,16 +28,18 @@ function stateOf(r: ProgressRow, reviewers: number): { key: Exclude<Filter, 'all
   return { key: 'waiting', text: 'Waiting for co-reviewer', cls: 'bg-sky-50 text-sky-800' };
 }
 
-export function ExtractionPage() {
+export function ExtractionPage({ kind = 'extraction' }: { kind?: ModuleKind }) {
+  const M = MODULES[kind];
   const { projectId = '' } = useParams();
   const project = useProject(projectId);
   const settings = useSettings(projectId);
   const [params, setParams] = useSearchParams();
-  const progress = useQuery({ queryKey: xk.progress(projectId), queryFn: () => getProgress(projectId) });
+  const progress = useQuery({ queryKey: xk.progress(projectId, kind), queryFn: () => getProgress(projectId, kind) });
   const team = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
   const [filter, setFilter] = useState<Filter>('all');
-  const form = readForm(settings.data);
-  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? (form ? 'studies' : 'form'));
+  const form = readForm(settings.data, kind);
+  const tabs = TABS.filter((t) => !t.only || t.only === kind);
+  const tab = (tabs.find((t) => t.key === params.get('tab'))?.key ?? (form ? 'studies' : 'form'));
   if (!project.data || !settings.data || !progress.data) return <PageLoader />;
 
   const rows = progress.data;
@@ -43,14 +51,11 @@ export function ExtractionPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
       <div>
-        <h1 className="text-2xl font-semibold text-ink-900">Data extraction</h1>
-        <p className="text-sm text-slate-600">
-          Each reviewer extracts every included study on their own; answers stay hidden from the other reviewer until both are complete.
-          Then you compare, agree the final version, and export the characteristics table.
-        </p>
+        <h1 className="text-2xl font-semibold text-ink-900">{M.title}</h1>
+        <p className="text-sm text-slate-600">{INTRO[kind]}</p>
       </div>
-      <div role="tablist" aria-label="Extraction sections" className="flex flex-wrap gap-1 border-b border-slate-200">
-        {TABS.map((t) => (
+      <div role="tablist" aria-label={`${M.title} sections`} className="flex flex-wrap gap-1 border-b border-slate-200">
+        {tabs.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setParams(t.key === 'studies' ? {} : { tab: t.key }, { replace: true })}
             className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === t.key ? 'border-ink-700 text-ink-900' : 'border-transparent text-slate-600 hover:text-ink-900')}>
             {t.label}
@@ -58,10 +63,11 @@ export function ExtractionPage() {
         ))}
       </div>
 
-      {tab === 'form' && <FormEditor key={JSON.stringify(form)} projectId={projectId} form={form} started={rows.some((r) => r.started_count > 0)} />}
-      {tab === 'agreement' && form && <AgreementTab projectId={projectId} title={project.data.title} form={form} progress={rows} />}
+      {tab === 'form' && <FormEditor kind={kind} key={JSON.stringify(form)} projectId={projectId} form={form} started={rows.some((r) => r.started_count > 0)} />}
+      {tab === 'agreement' && form && <AgreementTab kind={kind} projectId={projectId} title={project.data.title} form={form} progress={rows} />}
+      {tab === 'plot' && form && <RobPlotTab projectId={projectId} title={project.data.title} form={form} progress={rows} />}
       {tab !== 'form' && !form && (
-        <EmptyState title="Set up the extraction form first" action={<Link className="underline" to="?tab=form">Choose a form</Link>}>
+        <EmptyState title={`Set up the ${M.noun} form first`} action={<Link className="underline" to="?tab=form">Choose a form</Link>}>
           Pick a ready-made form and adjust it. Your co-reviewer will use the same one.
         </EmptyState>
       )}
@@ -73,7 +79,7 @@ export function ExtractionPage() {
           <div className="space-y-3">
             {reviewers < 2 && (
               <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-                You are the only reviewer on this project. To extract in duplicate, add your co-reviewer in{' '}
+                You are the only reviewer on this project. To work in duplicate, add your co-reviewer in{' '}
                 <Link className="underline" to={`/p/${projectId}/settings#team`}>Settings → Review team</Link>.
               </p>
             )}
@@ -92,11 +98,11 @@ export function ExtractionPage() {
             <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white" data-testid="extraction-list">
               {shown.map(({ r, s }) => (
                 <li key={r.reference_id}>
-                  <Link to={`/p/${projectId}/extraction/${r.reference_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50" data-testid="extraction-row">
+                  <Link to={`/p/${projectId}/${M.path}/${r.reference_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50" data-testid="extraction-row">
                     <span className="w-14 shrink-0 text-xs text-slate-500">#{r.seq}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink-900">{r.title}</span>
-                      <span className="block text-xs text-slate-500">{studyLabel(r.authors, r.year)}{r.final_tier ? ` · ${r.final_tier}` : ''}</span>
+                      <span className="block text-xs text-slate-500">{studyLabel(r.authors, r.year)}{kind === 'rob' ? (r.final_overall ? ` · ${r.final_overall} risk` : '') : (r.final_tier ? ` · ${r.final_tier}` : '')}</span>
                     </span>
                     <span className="text-xs text-slate-500">{r.complete_count} done</span>
                     <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium', s.cls)}>{s.text}</span>

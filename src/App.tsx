@@ -15,6 +15,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ImportPage } from './pages/ImportPage';
 import { ScreeningPage } from './screening/ScreeningPage';
 import { ExtractionPage } from './pages/ExtractionPage';
+import { SynthesisPage } from './pages/SynthesisPage';
 import { ProtocolPage, SearchStrategyPage } from './methods/MethodsReports';
 import { StudyExtraction } from './extraction/StudyExtraction';
 import { ReferencesPage } from './pages/ReferencesPage';
@@ -149,6 +150,9 @@ export default function App() {
           <Route path="methods" element={<MethodsPage />} />
           <Route path="extraction" element={<ExtractionPage />} />
           <Route path="extraction/:refId" element={<StudyExtraction />} />
+          <Route path="risk-of-bias" element={<ExtractionPage kind="rob" key="rob" />} />
+          <Route path="risk-of-bias/:refId" element={<StudyExtraction kind="rob" key="rob" />} />
+          <Route path="synthesis" element={<SynthesisPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
