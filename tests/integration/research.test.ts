@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { supabase } from '../../src/lib/supabase';
 import {
-  createRhProject, deleteRhProject, getPublicForm, listFields, listResponses, listRhProjects, responsesToCsv, saveFields,
+  createRhProject, deleteRhProject, getPublicForm, listFields, listResponses, listRhProjects, responsesToCsv, saveCodes, saveFields,
   latestSummary, submitResponse, updateRhProject, writeSummary, type RhField, type RhProject,
 } from '../../src/lib/api/research';
 
@@ -18,7 +18,7 @@ const anon = () => supabase.auth.signOut();
 
 let form: RhProject;
 const f = (label: string, type: RhField['type'], extra: Partial<RhField> = {}): RhField => ({
-  id: crypto.randomUUID(), project_id: '', label, help: null, type, options: [], required: false, field_order: 0, ...extra,
+  id: crypto.randomUUID(), project_id: '', label, help: null, type, options: [], required: false, field_order: 0, settings: {}, ...extra,
 });
 const qName = f('Your name', 'text', { required: true });
 const qAge = f('Age', 'number');
@@ -129,5 +129,113 @@ describe('ResearchHub questionnaires', () => {
     await anon();
     expect((await getPublicForm(form.id))?.status).toBe('closed');
     await expect(submitResponse(form.id, { [qName.id]: 'x', [qLevel.id]: '300' })).rejects.toMatchObject({ code: 'P0001' });
+  });
+});
+
+describe('ResearchHub v2: consent, skip logic, new types, closing rules, devices, coding', () => {
+  let v2: RhProject;
+  const smoke = f('Do you smoke?', 'radio', { options: ['Yes', 'No'], required: true });
+  const perDay = f('Cigarettes per day', 'number', { required: true, settings: { show_if: { field: smoke.id, op: 'equals', value: 'Yes' } } });
+  const scale = f('Stress', 'scale', { settings: { min: 0, max: 10, min_label: 'None' } });
+  const grid = f('Views', 'grid', { options: ['Agree', 'Disagree'], required: true, settings: { rows: ['Fair', 'Fast'] } });
+  const rank = f('Priorities', 'ranking', { options: ['Cost', 'Speed', 'Trust'] });
+  const when = f('Date of visit', 'date');
+  const why = f('Why?', 'textarea');
+  const base = { [smoke.id]: 'No', [grid.id]: { Fair: 'Agree', Fast: 'Disagree' } };
+
+  beforeAll(async () => {
+    await signIn(A);
+    v2 = await createRhProject({ title: `RH v2 ${Date.now()}` });
+    await saveFields(v2.id, [smoke, perDay, scale, grid, rank, when, why]);
+    await updateRhProject(v2.id, {
+      status: 'active', consent_text: 'You agree to take part.',
+      translations: { base_name: 'English', items: [{ code: 'tw', name: 'Twi', fields: {} }] },
+    });
+  });
+  afterAll(async () => {
+    await signIn(A);
+    if (v2) await deleteRhProject(v2.id).catch(() => {});
+  });
+
+  it('stores settings and serves them, with consent and translations, on the public form', async () => {
+    await signIn(A);
+    expect((await listFields(v2.id))[2].settings).toEqual({ min: 0, max: 10, min_label: 'None' });
+    await anon();
+    const pub = await getPublicForm(v2.id);
+    expect(pub?.consent_text).toBe('You agree to take part.');
+    expect(pub?.closed_reason).toBeNull();
+    expect(pub?.translations?.items?.[0].name).toBe('Twi');
+    expect(pub?.fields[1].settings?.show_if?.field).toBe(smoke.id);
+  });
+
+  it('requires consent, applies skip logic and validates the new types', async () => {
+    await anon();
+    await expect(submitResponse(v2.id, base)).rejects.toMatchObject({ code: '22023', message: expect.stringContaining('agree') });
+    const ok = { consent: true };
+    // Hidden question: not required, and its answer is dropped.
+    const id1 = await submitResponse(v2.id, { ...base, [perDay.id]: 40, [scale.id]: 0, [rank.id]: ['Trust', 'Cost', 'Speed'], [when.id]: '2026-10-01', [why.id]: 'cost of care' }, { ...ok, language: 'tw' });
+    expect(id1).toBeTruthy();
+    // Shown question: now required.
+    await expect(submitResponse(v2.id, { ...base, [smoke.id]: 'Yes' }, ok)).rejects.toMatchObject({ message: expect.stringContaining('Cigarettes per day') });
+    await submitResponse(v2.id, { ...base, [smoke.id]: 'Yes', [perDay.id]: 5, [why.id]: 'slow service and cost' }, { ...ok, language: 'nonsense' });
+    await expect(submitResponse(v2.id, { ...base, [scale.id]: 11 }, ok)).rejects.toMatchObject({ message: expect.stringContaining('0 to 10') });
+    await expect(submitResponse(v2.id, { ...base, [grid.id]: { Fair: 'Agree' } }, ok)).rejects.toMatchObject({ message: expect.stringContaining('every row') });
+    await expect(submitResponse(v2.id, { ...base, [grid.id]: { Fair: 'Agree', Fast: 'Maybe' } }, ok)).rejects.toMatchObject({ code: '22023' });
+    await expect(submitResponse(v2.id, { ...base, [rank.id]: ['Trust', 'Trust', 'Speed'] }, ok)).rejects.toMatchObject({ message: expect.stringContaining('order') });
+    await expect(submitResponse(v2.id, { ...base, [when.id]: '2026-02-30' }, ok)).rejects.toMatchObject({ message: expect.stringContaining('real date') });
+
+    await signIn(A);
+    const rows = await listResponses(v2.id);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].answers).not.toHaveProperty(perDay.id);
+    expect(rows[0].answers[rank.id]).toEqual(['Trust', 'Cost', 'Speed']);
+    expect(rows[0].language).toBe('tw');
+    expect(rows[0].consent_at).toBeTruthy();
+    expect(rows[1].language).toBeNull();
+    expect(rows[1].answers[perDay.id]).toBe(5);
+  });
+
+  it('the owner can code open answers; nobody else can, and other columns stay read-only', async () => {
+    await signIn(A);
+    const [r1] = await listResponses(v2.id);
+    await saveCodes(r1.id, { [why.id]: ['cost'] });
+    expect((await listResponses(v2.id))[0].codes).toEqual({ [why.id]: ['cost'] });
+    const tamper = await supabase.from('rh_responses').update({ answers: {} }).eq('id', r1.id).select('id');
+    expect(tamper.error).toBeTruthy();
+    await signIn(B);
+    await expect(saveCodes(r1.id, { [why.id]: ['x'] })).rejects.toBeTruthy();
+    await anon();
+    await expect(saveCodes(r1.id, { [why.id]: ['x'] })).rejects.toBeTruthy();
+    await signIn(A);
+    expect((await listResponses(v2.id))[0].codes).toEqual({ [why.id]: ['cost'] });
+  });
+
+  it('one response per device', async () => {
+    await signIn(A);
+    await updateRhProject(v2.id, { one_per_device: true });
+    await anon();
+    const meta = { consent: true, device: 'device-1' };
+    await expect(submitResponse(v2.id, base, { consent: true })).rejects.toMatchObject({ code: '22023' });
+    await submitResponse(v2.id, base, meta);
+    await expect(submitResponse(v2.id, base, meta)).rejects.toMatchObject({ code: 'P0001', message: expect.stringContaining('already') });
+    await submitResponse(v2.id, base, { consent: true, device: 'device-2' });
+  });
+
+  it('closes itself at the response limit and at the deadline', async () => {
+    await signIn(A);
+    await updateRhProject(v2.id, { one_per_device: false, max_responses: 4 });
+    await anon();
+    expect((await getPublicForm(v2.id))?.closed_reason).toBe('full');
+    await expect(submitResponse(v2.id, base, { consent: true })).rejects.toMatchObject({ message: expect.stringContaining('all the responses') });
+    await signIn(A);
+    await updateRhProject(v2.id, { max_responses: null, closes_at: new Date(Date.now() - 60_000).toISOString() });
+    await anon();
+    expect((await getPublicForm(v2.id))?.closed_reason).toBe('deadline');
+    await expect(submitResponse(v2.id, base, { consent: true })).rejects.toMatchObject({ message: expect.stringContaining('deadline') });
+    await signIn(A);
+    await updateRhProject(v2.id, { closes_at: new Date(Date.now() + 3_600_000).toISOString() });
+    await anon();
+    expect((await getPublicForm(v2.id))?.closed_reason).toBeNull();
+    expect(await submitResponse(v2.id, base, { consent: true })).toBeTruthy();
   });
 });

@@ -3,9 +3,10 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
 import { must } from '../errors';
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale';
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking';
 export type FormStatus = 'draft' | 'active' | 'closed';
-export type AnswerValue = string | number | string[];
+/** string (text, radio, date), number (number, scale), string[] (checkbox, ranking), { row: column } (grid). */
+export type AnswerValue = string | number | string[] | Record<string, string>;
 
 export const FIELD_TYPES: { type: FieldType; label: string; hint: string }[] = [
   { type: 'text', label: 'Short answer', hint: 'One line of text' },
@@ -13,11 +14,47 @@ export const FIELD_TYPES: { type: FieldType; label: string; hint: string }[] = [
   { type: 'number', label: 'Number', hint: 'e.g. age, hours per week' },
   { type: 'radio', label: 'Multiple choice', hint: 'Pick one option' },
   { type: 'checkbox', label: 'Checkboxes', hint: 'Pick any number of options' },
-  { type: 'scale', label: 'Scale 1–5', hint: 'e.g. strongly disagree → strongly agree' },
+  { type: 'scale', label: 'Scale', hint: 'e.g. 1–5 or 0–10, with labels for the ends' },
+  { type: 'grid', label: 'Likert grid', hint: 'Several statements, same answer options' },
+  { type: 'ranking', label: 'Ranking', hint: 'Put the options in order' },
+  { type: 'date', label: 'Date', hint: 'A calendar date' },
   { type: 'email', label: 'Email', hint: 'Validated email address' },
 ];
 export const FIELD_LABEL = Object.fromEntries(FIELD_TYPES.map((t) => [t.type, t.label])) as Record<FieldType, string>;
-export const hasOptions = (t: FieldType) => t === 'radio' || t === 'checkbox';
+export const hasOptions = (t: FieldType) => t === 'radio' || t === 'checkbox' || t === 'ranking' || t === 'grid';
+/** Questions another question can depend on in "show only if". */
+export const canBeCondition = (t: FieldType) => t !== 'grid' && t !== 'ranking';
+
+export type ConditionOp = 'equals' | 'not_equals' | 'answered';
+export interface ShowIf { field: string; op: ConditionOp; value?: string }
+export interface FieldSettings {
+  /** scale */
+  min?: number;
+  max?: number;
+  min_label?: string;
+  max_label?: string;
+  /** grid: the statements (rows); the options are the answer columns */
+  rows?: string[];
+  show_if?: ShowIf | null;
+}
+export const scaleRange = (s: FieldSettings | undefined) => {
+  const min = s?.min === 0 ? 0 : 1;
+  const max = Math.min(10, Math.max(min + 1, s?.max ?? 5));
+  return { min, max, points: Array.from({ length: max - min + 1 }, (_, i) => min + i) };
+};
+
+/** A translation of the form into another language. Options and rows translate by position. */
+export interface FieldTranslation { label?: string; help?: string; options?: string[]; rows?: string[]; min_label?: string; max_label?: string }
+export interface Translation {
+  code: string;
+  name: string;
+  title?: string;
+  description?: string;
+  consent_text?: string;
+  thank_you_message?: string;
+  fields: Record<string, FieldTranslation>;
+}
+export interface Translations { base_name?: string; items?: Translation[] }
 
 export const UNIVERSITIES = [
   'KNUST', 'University of Ghana', 'University of Cape Coast', 'Ashesi University', 'GIMPA',
@@ -36,6 +73,11 @@ export interface RhProject {
   thank_you_message: string | null;
   status: FormStatus;
   published_at: string | null;
+  consent_text: string | null;
+  closes_at: string | null;
+  max_responses: number | null;
+  one_per_device: boolean;
+  translations: Translations;
   created_at: string;
   updated_at: string;
 }
@@ -60,6 +102,7 @@ export interface RhField {
   options: string[];
   required: boolean;
   field_order: number;
+  settings: FieldSettings;
 }
 
 export interface RhResponse {
@@ -67,7 +110,12 @@ export interface RhResponse {
   project_id: string;
   answers: Record<string, AnswerValue>;
   submitted_at: string;
+  consent_at?: string | null;
+  language?: string | null;
+  codes?: Record<string, string[]>;
 }
+
+export type ClosedReason = 'closed' | 'deadline' | 'full' | null;
 
 export interface PublicForm {
   id: string;
@@ -77,6 +125,12 @@ export interface PublicForm {
   university: string | null;
   department: string | null;
   thank_you_message: string | null;
+  consent_text?: string | null;
+  closes_at?: string | null;
+  one_per_device?: boolean;
+  translations?: Translations;
+  /** Why the form is not taking responses (null = open). Missing on servers before v2. */
+  closed_reason?: ClosedReason;
   fields: Omit<RhField, 'project_id' | 'field_order'>[];
 }
 
@@ -111,8 +165,25 @@ export async function deleteRhProject(id: string): Promise<void> {
 }
 
 export async function listFields(projectId: string): Promise<RhField[]> {
-  return must(await supabase.from('rh_fields').select('*').eq('project_id', projectId)
+  const rows = must(await supabase.from('rh_fields').select('*').eq('project_id', projectId)
     .order('field_order').order('created_at')) as RhField[];
+  return rows.map((f) => ({ ...f, settings: f.settings ?? {} }));
+}
+
+/** Settings worth storing for a question of this type (drops leftovers from an earlier type). */
+export function cleanSettings(f: Pick<RhField, 'type' | 'settings'>): FieldSettings {
+  const s = f.settings ?? {};
+  const out: FieldSettings = {};
+  if (f.type === 'scale') {
+    const r = scaleRange(s);
+    out.min = r.min;
+    out.max = r.max;
+    if (s.min_label?.trim()) out.min_label = s.min_label.trim();
+    if (s.max_label?.trim()) out.max_label = s.max_label.trim();
+  }
+  if (f.type === 'grid') out.rows = (s.rows ?? []).map((r) => r.trim()).filter(Boolean).filter((r, i, a) => a.indexOf(r) === i).slice(0, 50);
+  if (s.show_if?.field) out.show_if = { field: s.show_if.field, op: s.show_if.op, ...(s.show_if.op === 'answered' ? {} : { value: s.show_if.value ?? '' }) };
+  return out;
 }
 
 /** Save the whole question list: upsert current questions (in order), delete removed ones. */
@@ -120,7 +191,7 @@ export async function saveFields(projectId: string, fields: RhField[]): Promise<
   const rows = fields.map((f, i) => ({
     id: f.id, project_id: projectId, label: f.label.trim(), help: f.help?.trim() || null, type: f.type,
     options: hasOptions(f.type) ? f.options.map((o) => o.trim()).filter(Boolean) : [],
-    required: f.required, field_order: i,
+    required: f.required, field_order: i, settings: cleanSettings(f),
   }));
   if (rows.length) must(await supabase.from('rh_fields').upsert(rows).select('id'));
   let del = supabase.from('rh_fields').delete().eq('project_id', projectId);
@@ -147,8 +218,31 @@ export async function getPublicForm(id: string): Promise<PublicForm | null> {
   return must(await supabase.rpc('rh_public_form', { p_project_id: id })) as PublicForm | null;
 }
 
-export async function submitResponse(id: string, answers: Record<string, AnswerValue>): Promise<string> {
-  return must(await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers })) as string;
+export interface SubmitMeta { consent?: boolean; language?: string | null; device?: string | null }
+
+export async function submitResponse(id: string, answers: Record<string, AnswerValue>, meta: SubmitMeta = {}): Promise<string> {
+  const res = await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers, p_meta: meta });
+  // A database not yet upgraded to ResearchHub v2 only knows the two-argument version.
+  if ((res.error as { code?: string } | null)?.code === 'PGRST202') {
+    return must(await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers })) as string;
+  }
+  return must(res) as string;
+}
+
+/** Save the owner's theme codes for one response. */
+export async function saveCodes(responseId: string, codes: Record<string, string[]>): Promise<void> {
+  must(await supabase.from('rh_responses').update({ codes }).eq('id', responseId).select('id').single());
+}
+
+/** A random token kept in this browser, used for "one response per device". */
+export function deviceToken(): string {
+  try {
+    let t = localStorage.getItem('rh-device');
+    if (!t) { t = crypto.randomUUID(); localStorage.setItem('rh-device', t); }
+    return t;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 export function publicFormUrl(id: string): string {
@@ -157,14 +251,42 @@ export function publicFormUrl(id: string): string {
 
 export function answerText(v: AnswerValue | undefined): string {
   if (v == null) return '';
-  return Array.isArray(v) ? v.join('; ') : String(v);
+  if (Array.isArray(v)) return v.join('; ');
+  if (typeof v === 'object') return Object.entries(v).map(([k, x]) => `${k}: ${x}`).join('; ');
+  return String(v);
+}
+
+/** CSV columns for one question: grids get a column per statement, rankings a column per option (its rank). */
+function csvColumns(f: RhField): { head: string; get: (r: RhResponse) => string }[] {
+  if (f.type === 'grid') {
+    return (f.settings?.rows ?? []).map((row) => ({
+      head: `${f.label} — ${row}`,
+      get: (r) => { const v = r.answers[f.id]; return v && typeof v === 'object' && !Array.isArray(v) ? v[row] ?? '' : ''; },
+    }));
+  }
+  if (f.type === 'ranking') {
+    return f.options.map((o) => ({
+      head: `${f.label} — rank of ${o}`,
+      get: (r) => { const v = r.answers[f.id]; const i = Array.isArray(v) ? v.indexOf(o) : -1; return i < 0 ? '' : String(i + 1); },
+    }));
+  }
+  return [{ head: f.label, get: (r) => answerText(r.answers[f.id]) }];
 }
 
 /** One row per response, one column per question (Excel-friendly, with BOM). */
-export function responsesToCsv(fields: RhField[], responses: RhResponse[]): string {
-  const header = ['Response #', 'Submitted at', ...fields.map((f) => f.label)];
-  const rows = responses.map((r, i) => [String(i + 1), new Date(r.submitted_at).toISOString(), ...fields.map((f) => answerText(r.answers[f.id]))]);
-  return '﻿' + Papa.unparse([header, ...rows]);
+export function responsesToCsv(fields: RhField[], responses: RhResponse[], languages: Translations = {}): string {
+  const cols = fields.flatMap((f) => {
+    const c = csvColumns(f);
+    if (responses.some((r) => r.codes?.[f.id]?.length)) c.push({ head: `${f.label} — codes`, get: (r) => (r.codes?.[f.id] ?? []).join('; ') });
+    return c;
+  });
+  const langName = new Map((languages.items ?? []).map((t) => [t.code, t.name]));
+  const extra: { head: string; get: (r: RhResponse) => string }[] = [];
+  if (responses.some((r) => r.language)) extra.push({ head: 'Language', get: (r) => (r.language ? langName.get(r.language) ?? r.language : languages.base_name || 'Original') });
+  if (responses.some((r) => r.consent_at)) extra.push({ head: 'Consent given at', get: (r) => (r.consent_at ? new Date(r.consent_at).toISOString() : '') });
+  const header = ['Response #', 'Submitted at', ...cols.map((c) => c.head), ...extra.map((c) => c.head)];
+  const rows = responses.map((r, i) => [String(i + 1), new Date(r.submitted_at).toISOString(), ...cols.map((c) => c.get(r)), ...extra.map((c) => c.get(r))]);
+  return '\ufeff' + Papa.unparse([header, ...rows]);
 }
 
 export interface RhSummaryBody {

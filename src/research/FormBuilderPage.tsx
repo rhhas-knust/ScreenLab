@@ -5,6 +5,8 @@ import {
   UNIVERSITIES, deleteRhProject, getRhProject, hasOptions, listFields, listResponses, rk, saveFields, updateRhProject,
   type RhField, type RhProject,
 } from '../lib/api/research';
+import { conditionProblems } from '../lib/research/logic';
+import { fmtDate } from '../lib/hooks';
 import { friendlyError } from '../lib/errors';
 import { Alert, Button, Card, Input, Label, PageLoader, Select, Textarea } from '../components/ui';
 import { useToast } from '../components/Toast';
@@ -12,20 +14,33 @@ import { FieldEditor } from './FieldEditor';
 import { FormView } from './FormView';
 import { SharePanel } from './SharePanel';
 import { StatusBadge } from './StatusBadge';
+import { TranslationsEditor } from './TranslationsEditor';
 
-type Details = Pick<RhProject, 'title' | 'description' | 'university' | 'department' | 'year' | 'thank_you_message'>;
+type Details = Pick<RhProject, 'title' | 'description' | 'university' | 'department' | 'year' | 'thank_you_message'
+  | 'consent_text' | 'closes_at' | 'max_responses' | 'one_per_device' | 'translations'>;
 
 const newField = (projectId: string): RhField => ({
-  id: crypto.randomUUID(), project_id: projectId, label: '', help: null, type: 'text', options: [], required: false, field_order: 0,
+  id: crypto.randomUUID(), project_id: projectId, label: '', help: null, type: 'text', options: [], required: false, field_order: 0, settings: {},
 });
+
+/** ISO timestamp <-> the value of an <input type="datetime-local"> (local time). */
+const toLocalInput = (iso: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+const fromLocalInput = (v: string) => (v ? new Date(v).toISOString() : null);
 
 function problems(d: Details, fields: RhField[]): string[] {
   const out: string[] = [];
   if (!d.title.trim()) out.push('The questionnaire needs a title.');
   fields.forEach((f, i) => {
     if (!f.label.trim()) out.push(`Question ${i + 1} has no text.`);
-    if (hasOptions(f.type) && f.options.length < 1) out.push(`Question ${i + 1} needs at least one option.`);
+    if (hasOptions(f.type) && f.options.length < (f.type === 'ranking' ? 2 : 1)) out.push(`Question ${i + 1} needs at least ${f.type === 'ranking' ? 'two options' : 'one option'}.`);
+    if (f.type === 'grid' && !(f.settings?.rows ?? []).some((r) => r.trim())) out.push(`Question ${i + 1} needs at least one statement.`);
   });
+  out.push(...conditionProblems(fields));
+  if (d.max_responses != null && (!Number.isInteger(d.max_responses) || d.max_responses < 1)) out.push('The response limit must be a whole number of 1 or more.');
   return out;
 }
 
@@ -47,7 +62,11 @@ export function FormBuilderPage() {
   useEffect(() => {
     if (pq.data && !dirty) {
       const p = pq.data;
-      setDetails({ title: p.title, description: p.description, university: p.university, department: p.department, year: p.year, thank_you_message: p.thank_you_message });
+      setDetails({
+        title: p.title, description: p.description, university: p.university, department: p.department, year: p.year, thank_you_message: p.thank_you_message,
+        consent_text: p.consent_text ?? null, closes_at: p.closes_at ?? null, max_responses: p.max_responses ?? null,
+        one_per_device: p.one_per_device ?? false, translations: p.translations ?? {},
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pq.data]);
@@ -74,6 +93,10 @@ export function FormBuilderPage() {
   if (!pq.data || !details || !fields) return <PageLoader />;
   const project = pq.data;
   const responseCount = rq.data?.length ?? 0;
+  const autoClosed = project.status === 'active' && !dirty
+    ? (project.closes_at && new Date(project.closes_at) <= new Date() ? `The deadline (${fmtDate(project.closes_at)}) has passed` : null)
+      ?? (project.max_responses && responseCount >= project.max_responses ? `The response limit (${project.max_responses}) has been reached` : null)
+    : null;
 
   const editDetails = (patch: Partial<Details>) => { setDetails({ ...details, ...patch }); setDirty(true); };
   const editFields = (next: RhField[]) => { setFields(next); setDirty(true); };
@@ -94,6 +117,8 @@ export function FormBuilderPage() {
       const patch: Partial<RhProject> = {
         title: details.title.trim(), description: details.description?.trim() || null, university: details.university || null,
         department: details.department?.trim() || null, year: details.year?.trim() || null, thank_you_message: details.thank_you_message?.trim() || null,
+        consent_text: details.consent_text?.trim() || null, closes_at: details.closes_at, max_responses: details.max_responses,
+        one_per_device: details.one_per_device, translations: details.translations,
       };
       if (status) patch.status = status;
       if (status === 'active' && !project.published_at) patch.published_at = new Date().toISOString();
@@ -141,6 +166,7 @@ export function FormBuilderPage() {
       <h1 className="text-2xl font-semibold text-ink-900">{project.title}</h1>
 
       {project.status !== 'draft' && <SharePanel project={project} />}
+      {autoClosed && <Alert kind="info">{autoClosed}, so the form is no longer taking responses. Change the closing rules below and save to reopen it.</Alert>}
       {responseCount > 0 && <Alert kind="info">This questionnaire has {responseCount} response{responseCount === 1 ? '' : 's'}. Editing questions now may make earlier and later answers inconsistent.</Alert>}
 
       <div className="flex gap-2" role="tablist">
@@ -150,9 +176,11 @@ export function FormBuilderPage() {
 
       {preview ? (
         <div className="rounded-xl bg-slate-50 p-3 sm:p-6">
-          <h2 className="text-xl font-semibold text-ink-900">{details.title}</h2>
-          {details.description && <p className="mt-1 whitespace-pre-wrap text-slate-700">{details.description}</p>}
-          <div className="mt-4"><FormView preview form={{ id: formId, status: project.status, university: details.university, department: details.department, thank_you_message: details.thank_you_message, title: details.title, description: details.description, fields: fields.filter((f) => f.label.trim()) }} /></div>
+          <FormView preview form={{
+            id: formId, status: project.status, university: details.university, department: details.department, thank_you_message: details.thank_you_message,
+            title: details.title, description: details.description, consent_text: details.consent_text, closes_at: details.closes_at,
+            one_per_device: details.one_per_device, translations: details.translations, closed_reason: null, fields: fields.filter((f) => f.label.trim()),
+          }} />
         </div>
       ) : (
         <>
@@ -189,14 +217,49 @@ export function FormBuilderPage() {
             </div>
           </Card>
 
+          <Card className="space-y-3 p-4">
+            <h2 className="font-semibold text-ink-900">Information sheet and consent</h2>
+            <div>
+              <Label htmlFor="rh-consent" hint="(optional — when filled in, respondents must agree before they see the questions)">Participant information</Label>
+              <Textarea id="rh-consent" rows={5} value={details.consent_text ?? ''} onChange={(e) => editDetails({ consent_text: e.target.value })} maxLength={20000}
+                placeholder={'Purpose of the study, what taking part involves, how long it takes, risks and benefits, how answers are kept confidential, that taking part is voluntary and they can stop at any time, and who to contact (researcher and ethics committee).'} />
+            </div>
+            <p className="text-xs text-slate-500">Respondents see this text with “I agree, continue” and “I do not agree”. The time they agreed is saved with each response.</p>
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <h2 className="font-semibold text-ink-900">Closing rules</h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="rh-closes" hint="(optional)">Stop taking responses at</Label>
+                <Input id="rh-closes" type="datetime-local" value={toLocalInput(details.closes_at)} onChange={(e) => editDetails({ closes_at: fromLocalInput(e.target.value) })} />
+              </div>
+              <div>
+                <Label htmlFor="rh-max" hint="(optional)">Stop after this many responses</Label>
+                <Input id="rh-max" type="number" min={1} inputMode="numeric" value={details.max_responses ?? ''}
+                  onChange={(e) => editDetails({ max_responses: e.target.value ? Number(e.target.value) : null })} placeholder="e.g. 200" />
+              </div>
+            </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-0.5" checked={details.one_per_device} onChange={(e) => editDetails({ one_per_device: e.target.checked })} />
+              <span>
+                One response per device
+                <span className="block text-xs text-slate-500">Stops the same phone or browser from submitting twice. Someone could still answer again from another device or a private window, so treat it as a deterrent, not proof of identity.</span>
+              </span>
+            </label>
+          </Card>
+
+          <TranslationsEditor value={details.translations} onChange={(t) => editDetails({ translations: t })} fields={fields}
+            base={{ title: details.title, description: details.description, consent_text: details.consent_text, thank_you_message: details.thank_you_message }} />
+
           <section className="space-y-3" aria-label="Questions">
             <h2 className="font-semibold text-ink-900">Questions ({fields.length})</h2>
             {fields.length === 0 && <p className="text-sm text-slate-500">No questions yet — add your first question below.</p>}
             {fields.map((f, i) => (
-              <FieldEditor key={f.id} field={f} index={i} count={fields.length} hasResponses={responseCount > 0}
+              <FieldEditor key={f.id} field={f} index={i} count={fields.length} earlier={fields.slice(0, i)} hasResponses={responseCount > 0}
                 onChange={(p) => patchField(i, p)} onMove={(d) => move(i, d)}
                 onRemove={() => editFields(fields.filter((_, j) => j !== i))}
-                onDuplicate={() => editFields([...fields.slice(0, i + 1), { ...f, id: crypto.randomUUID() }, ...fields.slice(i + 1)])} />
+                onDuplicate={() => editFields([...fields.slice(0, i + 1), { ...f, id: crypto.randomUUID(), settings: { ...f.settings } }, ...fields.slice(i + 1)])} />
             ))}
             <Button onClick={() => editFields([...fields, newField(formId)])}>+ Add question</Button>
           </section>

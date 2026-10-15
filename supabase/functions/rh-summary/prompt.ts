@@ -2,16 +2,16 @@
 // The statistics are computed here, from the database, and handed to the model as
 // facts; the model only writes prose around them. Email answers are never sent.
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale';
-export interface Field { id: string; label: string; type: FieldType; options: string[] }
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking';
+export interface Field { id: string; label: string; type: FieldType; options: string[]; settings?: { min?: number; max?: number; rows?: string[] } }
 export interface Form { title: string; description?: string | null; university?: string | null; department?: string | null }
-export type Answers = Record<string, string | number | string[]>;
+export type Answers = Record<string, string | number | string[] | Record<string, string>>;
 
 export const MIN_RESPONSES = 3;
 const MAX_TEXT_ANSWERS = 80;
 const MAX_TEXT_CHARS = 400;
 
-const blank = (v: unknown) => v == null || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '');
+const blank = (v: unknown) => v == null || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' ? Object.keys(v as object).length === 0 : String(v).trim() === '');
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (c: number, of: number) => (of ? Math.round((c / of) * 1000) / 10 : 0);
 
@@ -39,11 +39,26 @@ export function buildUserText(form: Form, fields: Field[], responses: Answers[])
     out.push(`  Answered by ${vals.length} of ${responses.length}.`);
     if (!vals.length) { out.push(''); return; }
     if (f.type === 'number' || f.type === 'scale') {
+      const lo = f.settings?.min === 0 ? 0 : 1, hi = f.settings?.max ?? 5;
       const xs = vals.map(Number).filter(Number.isFinite);
-      if (xs.length) out.push(`  ${numericLine(xs)}${f.type === 'scale' ? ' (scale 1–5)' : ''}`);
+      if (xs.length) out.push(`  ${numericLine(xs)}${f.type === 'scale' ? ` (scale ${lo}–${hi})` : ''}`);
       if (f.type === 'scale') {
-        out.push(`  Counts: ${[1, 2, 3, 4, 5].map((v) => `${v}=${xs.filter((x) => x === v).length}`).join(', ')}`);
+        out.push(`  Counts: ${Array.from({ length: hi - lo + 1 }, (_, k) => lo + k).map((v) => `${v}=${xs.filter((x) => x === v).length}`).join(', ')}`);
       }
+    } else if (f.type === 'grid') {
+      for (const row of f.settings?.rows ?? []) {
+        const picks = vals.map((v) => (v as Record<string, string>)[row]).filter(Boolean);
+        out.push(`  "${row}": ${f.options.map((o) => { const c = picks.filter((x) => x === o).length; return `"${o}" ${c} (${pct(c, picks.length)}%)`; }).join('; ')}`);
+      }
+    } else if (f.type === 'ranking') {
+      const lists = vals.filter(Array.isArray) as string[][];
+      for (const o of f.options) {
+        const ranks = lists.map((l) => l.indexOf(o) + 1).filter((x) => x > 0);
+        out.push(`  "${o}": mean rank ${ranks.length ? r2(ranks.reduce((a, b) => a + b, 0) / ranks.length) : '–'} (1 = top), ranked first by ${lists.filter((l) => l[0] === o).length}`);
+      }
+    } else if (f.type === 'date') {
+      const ds = vals.map(String).sort();
+      out.push(`  earliest ${ds[0]}, latest ${ds[ds.length - 1]}`);
     } else if (f.type === 'radio' || f.type === 'checkbox') {
       const counts = new Map<string, number>(f.options.map((o) => [o, 0]));
       for (const v of vals) for (const c of Array.isArray(v) ? v : [String(v)]) counts.set(c, (counts.get(c) ?? 0) + 1);

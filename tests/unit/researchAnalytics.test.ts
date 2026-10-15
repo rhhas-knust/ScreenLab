@@ -4,7 +4,7 @@ import type { RhField, RhResponse } from '../../src/lib/api/research';
 import { buildUserText, parseResult, resultSchema, type Answers } from '../../supabase/functions/rh-summary/prompt';
 
 const field = (id: string, type: RhField['type'], options: string[] = []): RhField =>
-  ({ id, project_id: 'p', label: `Question ${id}`, help: null, type, options, required: false, field_order: 0 });
+  ({ id, project_id: 'p', label: `Question ${id}`, help: null, type, options, required: false, field_order: 0, settings: {} });
 const resp = (i: number, answers: RhResponse['answers'], day = '2026-10-01'): RhResponse =>
   ({ id: `r${i}`, project_id: 'p', answers, submitted_at: `${day}T10:0${i % 10}:00Z` });
 

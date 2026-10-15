@@ -678,6 +678,80 @@ try {
   await page.emulateMedia({ media: 'screen' });
   await shot(page, '32-rh-report');
 
+  // ResearchHub v2: consent, skip logic, Likert grid, languages, one response per device, cross-tab, coding
+  await page.goto(`${APP}/research/${rhId}`);
+  await page.getByLabel('Participant information').fill('This study is about study habits. Taking part is voluntary.');
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 4', { exact: true }).fill('Do you use a study group?');
+  page.once('dialog', (d) => d.accept());
+  await page.getByLabel('Answer type').nth(3).selectOption('radio');
+  await page.getByLabel('Options').nth(1).fill('Yes\nNo');
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 5', { exact: true }).fill('Which study group?');
+  await page.getByTestId('rh-add-condition').last().click();
+  await page.getByLabel('Answer', { exact: true }).selectOption('Yes');
+  await page.getByRole('button', { name: '+ Add question' }).click();
+  await page.getByLabel('Question 6', { exact: true }).fill('How do you feel about your course?');
+  page.once('dialog', (d) => d.accept());
+  await page.getByLabel('Answer type').nth(5).selectOption('grid');
+  await page.getByLabel('Statements').fill('Lectures are clear\nAssessments are fair');
+  await page.getByLabel('Add a language').fill('Twi');
+  await page.getByTestId('rh-languages').getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByTestId('rh-languages').getByLabel('Title').fill('Adesua ho nhwehwɛmu');
+  await page.getByRole('checkbox', { name: /One response per device/ }).check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByText('All changes saved').waitFor();
+  check('ResearchHub v2: skip logic, grid, consent and language saved', sql(`select settings->'show_if'->>'value' from rh_fields where project_id='${rhId}' and label='Which study group?'`) === 'Yes'
+    && sql(`select jsonb_array_length(settings->'rows') from rh_fields where project_id='${rhId}' and type='grid'`) === '2'
+    && sql(`select (consent_text is not null and one_per_device and translations->'items'->0->>'name' = 'Twi')::text from rh_projects where id='${rhId}'`) === 'true');
+  await shot(page, '32b-rh-builder-v2');
+
+  const pub2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p2 = await pub2.newPage();
+  await p2.goto(`${APP}/f/${rhId}`);
+  await p2.getByTestId('rh-consent').waitFor();
+  check('ResearchHub v2: respondents see the information sheet before the questions', (await p2.getByTestId('rh-form-question').count()) === 0);
+  await shot(p2, '32c-rh-consent-mobile');
+  await p2.getByRole('button', { name: 'I agree, continue' }).click();
+  await p2.getByRole('button', { name: 'Twi' }).click();
+  check('ResearchHub v2: language picker shows the translation', await visible(p2.getByRole('heading', { name: 'Adesua ho nhwehwɛmu' })));
+  await p2.getByRole('button', { name: 'English' }).click();
+  check('ResearchHub v2: conditional question hidden until its answer is chosen', (await p2.getByTestId('rh-form-question').count()) === 5);
+  await p2.getByLabel('400').check();
+  await p2.getByRole('textbox', { name: /Hours of study per week/ }).fill('15');
+  await p2.getByText('3', { exact: true }).click();
+  await p2.getByLabel('Yes', { exact: true }).check();
+  check('ResearchHub v2: conditional question appears', (await p2.getByTestId('rh-form-question').count()) === 6);
+  await p2.getByRole('textbox', { name: /Which study group/ }).fill('Group A');
+  await p2.getByTestId('rh-grid').getByText('Agree', { exact: true }).nth(0).click();
+  await p2.getByTestId('rh-grid').getByText('Strongly agree', { exact: true }).nth(1).click();
+  await shot(p2, '32d-rh-skip-grid-mobile');
+  await p2.getByRole('button', { name: 'Submit' }).click();
+  await p2.getByRole('heading', { name: 'Thank you!' }).waitFor();
+  check('ResearchHub v2: one-per-device form offers no second response', !(await visible(p2.getByRole('button', { name: 'Submit another response' }))));
+  await p2.reload();
+  check('ResearchHub v2: the same device is told it already responded', await visible(p2.getByText('A response has already been submitted from this device.')));
+  await pub2.close();
+  const v2row = sql(`select answers::text || '|' || (consent_at is not null)::text from rh_responses where project_id='${rhId}' and answers::text like '%Group A%'`);
+  check('ResearchHub v2: response stored with grid answers and consent time', /"Lectures are clear": "Agree"/.test(v2row) && /"Assessments are fair": "Strongly agree"/.test(v2row) && v2row.endsWith('|true'), v2row);
+
+  await page.goto(`${APP}/research/${rhId}/responses`);
+  await page.getByTestId('rh-filters').waitFor();
+  await page.getByLabel('Filter question').selectOption({ label: 'Q1. Which level are you in?' });
+  await page.getByLabel('Filter answer').selectOption('400');
+  check('ResearchHub v2: filters narrow the results', /4 of 5 responses/.test(await page.getByTestId('rh-filter-count').textContent()));
+  await page.getByRole('tab', { name: 'Cross-tab' }).click();
+  await page.getByTestId('rh-crosstab').waitFor();
+  check('ResearchHub v2: cross-tab with chi-square', /answered both questions/.test(await page.getByTestId('rh-chi').textContent()));
+  await shot(page, '32e-rh-crosstab');
+  await page.getByRole('tab', { name: 'Code open answers' }).click();
+  await page.getByTestId('rh-code-item').first().waitFor();
+  await page.getByLabel(/Add a code to response/).first().fill('peer support');
+  await page.getByLabel(/Add a code to response/).first().press('Enter');
+  await page.getByText('peer support', { exact: true }).waitFor();
+  check('ResearchHub v2: open answers can be coded into themes', sql(`select codes::text from rh_responses where project_id='${rhId}' and answers::text like '%Group A%'`).includes('peer support'));
+  await shot(page, '32f-rh-coding');
+
   // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
   await page.goto(`${APP}/p/${projectId}/methods`);
   await page.getByTestId('prisma-diagram').locator('svg').waitFor();

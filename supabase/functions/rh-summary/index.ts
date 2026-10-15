@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     .eq('id', body.project_id).maybeSingle();
   if (!form) return json(404, { error: 'Questionnaire not found' });
   const [{ data: fields }, { data: rows }] = await Promise.all([
-    db.from('rh_fields').select('id,label,type,options').eq('project_id', form.id).order('field_order'),
+    db.from('rh_fields').select('id,label,type,options,settings').eq('project_id', form.id).order('field_order'),
     db.from('rh_responses').select('answers').eq('project_id', form.id).order('submitted_at').limit(MAX_RESPONSES),
   ]);
   const responses = (rows ?? []).map((r) => r.answers as Answers);
