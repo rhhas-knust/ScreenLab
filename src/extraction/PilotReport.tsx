@@ -34,6 +34,7 @@ export function PilotReport() {
   const savedNotes = ((settings.data?.settings?.pilot_notes ?? {}) as Record<string, string>)[kind] ?? '';
   const [notes, setNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [only, setOnly] = useState(params.get('reviewer') ?? '');
 
   useEffect(() => { if (settings.data && notes === null) setNotes(savedNotes); }, [settings.data, savedNotes, notes]);
   useEffect(() => {
@@ -49,15 +50,19 @@ export function PilotReport() {
   const inProject = new Set(progress.data.map((p) => p.reference_id));
   const det = new Map(details.data.map((d) => [d.id, d]));
   const finals = new Map(all.data.finals.map((f) => [f.reference_id, f.data]));
+  const allReviewers = [...new Set(all.data.extractions.filter((e) => e.status === 'complete').map((e) => e.reviewer_id))];
   const input: PilotInput[] = doneIds.filter((id) => inProject.has(id) && det.has(id)).map((id) => {
     const d = det.get(id)!;
     return {
       seq: d.seq, label: studyLabel(d.authors, d.year), title: d.title, final: finals.get(id) ?? null,
-      entries: all.data.extractions.filter((e) => e.reference_id === id && e.status === 'complete').map((e) => ({ reviewer: email(e.reviewer_id), data: e.data })),
+      entries: all.data.extractions.filter((e) => e.reference_id === id && e.status === 'complete' && (!only || e.reviewer_id === only))
+        .map((e) => ({ reviewer: email(e.reviewer_id), data: e.data })),
     };
   });
   const pilot = buildPilot(form, input);
   const ag = pilot.agreement;
+  /** Agreement only means something when both reviewers did the same study. */
+  const compared = ag.studies > 0;
   const title = `Pilot ${M.noun} report`;
   const date = fmtDate(new Date().toISOString(), false);
 
@@ -79,11 +84,13 @@ export function PilotReport() {
       heading: 'Summary', head: ['Item', 'Result'],
       rows: [
         ['Date', date], ['Reviewers', pilot.reviewers.join('; ')], ['Studies piloted', pilot.studies.map((s) => `${s.label} (#${s.seq})`).join('; ')],
-        ['Studies completed by two reviewers', String(ag.studies)], ['Overall agreement', `${pct(ag.agreedCells, ag.cells)} (${ag.agreedCells} of ${ag.cells} answers)`],
-        ['Fields with most disagreement', pilot.hardest.slice(0, 5).map((f) => `${f.label} (${pct(f.agreed, f.compared)})`).join('; ') || 'None'],
+        ...(compared ? [
+          ['Studies completed by two reviewers', String(ag.studies)], ['Overall agreement', `${pct(ag.agreedCells, ag.cells)} (${ag.agreedCells} of ${ag.cells} answers)`],
+          ['Fields with most disagreement', pilot.hardest.slice(0, 5).map((f) => `${f.label} (${pct(f.agreed, f.compared)})`).join('; ') || 'None'],
+        ] : []),
       ],
     },
-    { heading: 'Agreement by field', head: ['Field', 'Compared', 'Agreed', "Cohen's kappa"], rows: ag.fields.map((f) => [f.label, String(f.compared), `${f.agreed} (${pct(f.agreed, f.compared)})`, f.kappa == null ? '–' : f.kappa.toFixed(2)]) },
+    ...(compared ? [{ heading: 'Agreement by field', head: ['Field', 'Compared', 'Agreed', "Cohen's kappa"], rows: ag.fields.map((f) => [f.label, String(f.compared), `${f.agreed} (${pct(f.agreed, f.compared)})`, f.kappa == null ? '–' : f.kappa.toFixed(2)]) }] : []),
     ...pilot.studies.map((s) => ({
       heading: `${s.label} (#${s.seq}): ${s.differences} difference${s.differences === 1 ? '' : 's'}`,
       head: ['Field', ...s.entries.map((e) => e.reviewer), 'Agreed final', 'Differs'],
@@ -97,6 +104,12 @@ export function PilotReport() {
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2 print:hidden">
         <Link to={`/p/${projectId}/${M.path}?tab=agreement`} className="text-sm text-slate-600 hover:underline">← Back to {M.title}</Link>
         <span className="flex-1" />
+        {allReviewers.length > 1 && (
+          <select aria-label="Reviewer" className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" value={only} onChange={(e) => setOnly(e.target.value)} data-testid="pilot-reviewer">
+            <option value="">All reviewers</option>
+            {allReviewers.map((id) => <option key={id} value={id}>{email(id)} only</option>)}
+          </select>
+        )}
         <Button variant="secondary" onClick={word} data-testid="pilot-word">Word</Button>
         <Button variant="primary" onClick={() => window.print()}>Save as PDF</Button>
       </div>
@@ -115,14 +128,20 @@ export function PilotReport() {
               <h2 className="text-lg font-semibold">Summary</h2>
               <ul className="list-disc space-y-0.5 pl-6" data-testid="pilot-summary">
                 <li>Studies piloted: {pilot.studies.map((s) => `${s.label} (#${s.seq})`).join('; ')}.</li>
-                <li>Completed by two reviewers: {ag.studies} of {pilot.studies.length}.</li>
-                <li>Overall agreement before discussion: <strong>{pct(ag.agreedCells, ag.cells)}</strong> ({ag.agreedCells} of {ag.cells} answers).</li>
-                <li>Fields with most disagreement: {pilot.hardest.length ? pilot.hardest.slice(0, 5).map((f) => `${f.label} (${pct(f.agreed, f.compared)})`).join('; ') : 'none'}.</li>
+                {compared ? (
+                  <>
+                    <li>Completed by two reviewers: {ag.studies} of {pilot.studies.length}.</li>
+                    <li>Overall agreement before discussion: <strong>{pct(ag.agreedCells, ag.cells)}</strong> ({ag.agreedCells} of {ag.cells} answers).</li>
+                    <li>Fields with most disagreement: {pilot.hardest.length ? pilot.hardest.slice(0, 5).map((f) => `${f.label} (${pct(f.agreed, f.compared)})`).join('; ') : 'none'}.</li>
+                  </>
+                ) : (
+                  <li>Each study was {M.noun === 'appraisal' ? 'appraised' : 'extracted'} by one reviewer, so agreement between reviewers is not calculated.</li>
+                )}
               </ul>
-              {ag.studies < pilot.studies.length && <p className="text-sm text-amber-800 print:hidden">Some studies have only one reviewer's {M.noun} so far; agreement uses the double-completed ones only.</p>}
+              {compared && ag.studies < pilot.studies.length && <p className="text-sm text-amber-800 print:hidden">Some studies have only one reviewer's {M.noun} so far; agreement uses the double-completed ones only.</p>}
             </section>
 
-            <section className="space-y-2">
+            {compared && <section className="space-y-2">
               <h2 className="text-lg font-semibold">Agreement by field</h2>
               <table className="w-full border-collapse text-sm">
                 <thead><tr><th className={th}>Field</th><th className={th}>Compared</th><th className={th}>Agreed</th><th className={th}>Cohen’s κ</th></tr></thead>
@@ -130,7 +149,7 @@ export function PilotReport() {
                   <tr key={f.key} className="break-inside-avoid"><td className={td}>{f.label}</td><td className={td}>{f.compared}</td><td className={td}>{f.agreed} ({pct(f.agreed, f.compared)})</td><td className={td}>{f.kappa == null ? '–' : f.kappa.toFixed(2)}</td></tr>
                 ))}</tbody>
               </table>
-            </section>
+            </section>}
 
             {pilot.studies.map((s) => (
               <section key={s.seq} className="space-y-2" data-testid="pilot-study">

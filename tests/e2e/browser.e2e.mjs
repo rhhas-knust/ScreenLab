@@ -850,7 +850,9 @@ try {
   await page.getByTestId('pilot-report').waitFor();
   check('Pilot report: lists each piloted study with the reviewers and agreed answers', (await page.getByTestId('pilot-study').count()) === 1 && /GPT-4o \(May 2024\)/.test(await page.getByTestId('pilot-report').textContent()));
   const [pilotDoc] = await Promise.all([page.waitForEvent('download'), page.getByTestId('pilot-word').click()]);
-  check('Pilot report: downloads for Word', /Agreement by field/.test(fs.readFileSync(await pilotDoc.path(), 'utf8')));
+  const pilotText = fs.readFileSync(await pilotDoc.path(), 'utf8');
+  check('Pilot report: downloads for Word', /Studies piloted/.test(pilotText) && /GPT-4o \(May 2024\)/.test(pilotText));
+  check('Pilot report: no agreement figures when no study was done by both reviewers', !/Agreement by field/.test(pilotText) && /agreement between reviewers is not calculated/.test(await page.getByTestId('pilot-summary').textContent()));
   await page.getByRole('textbox', { name: 'Pilot notes' }).fill('Clarified the LLM version field.');
   await page.getByTestId('pilot-notes-save').click();
   await page.getByText('Notes saved').first().waitFor();
