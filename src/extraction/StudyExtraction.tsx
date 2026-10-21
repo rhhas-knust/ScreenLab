@@ -10,7 +10,7 @@ import {
   display, fillEmpty, isEmpty, mergeForFinal, MODULES, readAiDraft, readForm, sameValue, studyLabel, type ExtractionData, type ExtractionForm, type ModuleKind, type Value,
 } from '../lib/extraction/form';
 import { friendlyError } from '../lib/errors';
-import { useSettings } from '../lib/hooks';
+import { useProject, useSettings } from '../lib/hooks';
 import { Alert, Button, Card, cx, EmptyState, PageLoader } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { FieldInput } from './FieldInput';
@@ -123,6 +123,7 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
   const qc = useQueryClient();
   const toast = useToast();
   const settings = useSettings(projectId);
+  const project = useProject(projectId);
   const form = readForm(settings.data, kind);
   const q = useQuery({ queryKey: xk.reference(refId, kind), queryFn: () => getForReference(refId, kind) });
   const progress = useQuery({ queryKey: xk.progress(projectId, kind), queryFn: () => getProgress(projectId, kind) });
@@ -151,7 +152,9 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
   const iAmComplete = mine?.status === 'complete';
   const sources = iAmComplete ? [mine!, ...completeOthers] : !mine && completeOthers.length >= 2 ? completeOthers : [];
   const filled = form.fields.filter((fl) => !isEmpty(data[fl.key])).length;
-  const aiDraft = !iAmComplete ? readAiDraft(settings.data, refId, kind) : null;
+  // AI drafts are the owner's working aid only: a co-reviewer never sees them, so their review stays independent.
+  const isOwner = !!project.data && project.data.owner_id === me;
+  const aiDraft = isOwner && !iAmComplete ? readAiDraft(settings.data, refId, kind) : null;
   const useAiDraft = () => {
     if (!aiDraft) return;
     const r = fillEmpty(form, data, aiDraft.data);

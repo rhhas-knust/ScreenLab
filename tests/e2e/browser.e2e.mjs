@@ -877,6 +877,20 @@ try {
   check('Risk of bias: AI draft fills only empty answers and saves nothing by itself',
     await page.getByRole('combobox', { name: /^Q2\./ }).inputValue() === 'No'
     && sql(`select count(*) from extractions where project_id='${projectId}' and kind='rob'`) === '0');
+  {
+    const ctxCo = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const pco = await ctxCo.newPage();
+    await pco.goto(`${APP}/login`);
+    await pco.getByLabel('Email').fill('e2e-b@screenlab.test');
+    await pco.getByLabel('Password').fill('E2e-test-password-1');
+    await pco.getByRole('button', { name: 'Sign in' }).click();
+    await pco.waitForURL((u) => !u.pathname.startsWith('/login'));
+    await pco.goto(`${APP}/p/${projectId}/risk-of-bias/${sql(`select id from study_references where project_id='${projectId}' and seq=${exSeq}`)}`);
+    await pco.getByTestId('extraction-title').waitFor();
+    await pco.getByTestId('rob-form').or(pco.getByTestId('extraction-form')).first().waitFor();
+    check('Risk of bias: a co-reviewer never sees the AI draft, so their appraisal stays independent', (await pco.getByTestId('ai-draft-rob').count()) === 0);
+    await ctxCo.close();
+  }
   await page.getByRole('combobox', { name: /^Q1\./ }).selectOption('Yes');
   await page.getByRole('combobox', { name: /^Q7\./ }).selectOption('Unclear');
   await page.getByRole('combobox', { name: 'Overall risk of bias' }).selectOption('Low');
