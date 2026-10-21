@@ -7,7 +7,7 @@ import {
 import { getReference } from '../lib/api/references';
 import { listFiles, signedPdfUrl } from '../lib/api/fulltext';
 import {
-  display, isEmpty, mergeForFinal, MODULES, readForm, sameValue, studyLabel, type ExtractionData, type ExtractionForm, type ModuleKind, type Value,
+  display, fillEmpty, isEmpty, mergeForFinal, MODULES, readAiDraft, readForm, sameValue, studyLabel, type ExtractionData, type ExtractionForm, type ModuleKind, type Value,
 } from '../lib/extraction/form';
 import { friendlyError } from '../lib/errors';
 import { useSettings } from '../lib/hooks';
@@ -144,6 +144,14 @@ export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) 
   const iAmComplete = mine?.status === 'complete';
   const sources = iAmComplete ? [mine!, ...completeOthers] : !mine && completeOthers.length >= 2 ? completeOthers : [];
   const filled = form.fields.filter((fl) => !isEmpty(data[fl.key])).length;
+  const aiDraft = kind === 'extraction' && !iAmComplete ? readAiDraft(settings.data, refId) : null;
+  const useAiDraft = () => {
+    if (!aiDraft) return;
+    const r = fillEmpty(form, data, aiDraft.data);
+    setData(r.data);
+    if (r.filled) setDirty(true);
+    toast(r.filled ? `Filled ${r.filled} empty field${r.filled === 1 ? '' : 's'} from the AI draft. Check each one against the paper before saving.` : 'No empty fields to fill.');
+  };
 
   const save = async (status: 'draft' | 'complete') => {
     setBusy(status);
@@ -175,6 +183,16 @@ export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) 
           {final && <Alert kind="success">The final {M.noun} for this study has been agreed.</Alert>}
           {!iAmComplete && others.length > 0 && (
             <Alert kind="info">{others.length === 1 ? 'Another reviewer has' : `${others.length} reviewers have`} started this study. Their answers stay hidden until you mark yours complete, so the two {M.noun}s are independent.</Alert>
+          )}
+          {aiDraft && (
+            <div data-testid="ai-draft"><Card className="space-y-2 border-violet-200 bg-violet-50 p-3">
+              <p className="text-sm font-semibold text-violet-900">AI draft available (suggestion only)</p>
+              <p className="text-xs text-violet-900">
+                Suggested {display(aiDraft.data.tier) || 'tier not set'} · from {aiDraft.source || 'unknown source'}. It is not a reviewer’s extraction and is not saved unless you save it.
+                Using it fills only your empty fields; verify every value against the paper. Report AI-assisted extraction in your methods.
+              </p>
+              <Button size="sm" variant="secondary" onClick={useAiDraft}>Fill empty fields from AI draft</Button>
+            </Card></div>
           )}
         </div>
 

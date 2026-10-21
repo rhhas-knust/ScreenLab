@@ -147,6 +147,32 @@ export function readForm(settings: { settings?: Record<string, unknown> } | unde
 }
 
 /** A key for a new field, unique within the form. */
+/**
+ * AI-drafted extractions, stored apart from reviewers' own work in
+ * settings.ai_extraction_drafts keyed by reference id. A reviewer can copy one
+ * into their form to check; nothing is saved until they save it themselves.
+ */
+export interface AiDraft { source: string; data: ExtractionData; created_at?: string }
+export const AI_DRAFTS_KEY = 'ai_extraction_drafts';
+export function readAiDraft(settings: { settings?: Record<string, unknown> } | undefined, referenceId: string): AiDraft | null {
+  const all = settings?.settings?.[AI_DRAFTS_KEY] as Record<string, unknown> | undefined;
+  const d = all?.[referenceId] as Partial<AiDraft> | undefined;
+  if (!d || typeof d.data !== 'object' || d.data === null) return null;
+  return { source: typeof d.source === 'string' ? d.source : '', data: d.data as ExtractionData, created_at: d.created_at };
+}
+/** Fills only the fields that are still empty, so a reviewer's own answers are never overwritten. */
+export function fillEmpty(form: ExtractionForm, mine: ExtractionData, draft: ExtractionData): { data: ExtractionData; filled: number } {
+  const data = { ...mine };
+  let filled = 0;
+  for (const fl of form.fields) {
+    const v = draft[fl.key];
+    if (v == null || isEmpty(v) || !isEmpty(data[fl.key])) continue;
+    data[fl.key] = Array.isArray(v) ? [...v] : v;
+    filled++;
+  }
+  return { data, filled };
+}
+
 export function newKey(label: string, taken: string[]): string {
   const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'field';
   let k = base;

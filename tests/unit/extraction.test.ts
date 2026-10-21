@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import Papa from 'papaparse';
 import {
-  agreement, characteristicsCsv, cohensKappa, mergeForFinal, newKey, PRESETS, readForm, sameValue, studyLabel, tierCounts,
+  agreement, characteristicsCsv, cohensKappa, fillEmpty, mergeForFinal, newKey, PRESETS, readAiDraft, readForm, sameValue, studyLabel, tierCounts,
   type ExtractionForm,
 } from '../../src/lib/extraction/form';
 
@@ -76,5 +76,21 @@ describe('extraction form', () => {
   it('ships presets with unique keys, and the LLM preset has the Tier field first', () => {
     for (const p of PRESETS) expect(new Set(p.form.fields.map((x) => x.key)).size).toBe(p.form.fields.length);
     expect(PRESETS[0].form.fields[0]).toMatchObject({ key: 'tier', options: ['Tier 1', 'Tier 2'] });
+  });
+});
+
+describe('AI drafts', () => {
+  it('reads a draft for one reference and ignores malformed entries', () => {
+    const s = { settings: { ai_extraction_drafts: { r1: { source: 'full text', data: { tier: 'Tier 1' } }, r2: { source: 'x' } } } };
+    expect(readAiDraft(s, 'r1')).toEqual({ source: 'full text', data: { tier: 'Tier 1' }, created_at: undefined });
+    expect(readAiDraft(s, 'r2')).toBeNull();
+    expect(readAiDraft(s, 'missing')).toBeNull();
+    expect(readAiDraft(undefined, 'r1')).toBeNull();
+  });
+
+  it('fills only empty fields and never overwrites the reviewer', () => {
+    const r = fillEmpty(form, { tier: 'Tier 2', factors: [] }, { tier: 'Tier 1', factors: ['Race'], n: '40', unknown: 'x' });
+    expect(r.data).toEqual({ tier: 'Tier 2', factors: ['Race'], n: '40' });
+    expect(r.filled).toBe(2);
   });
 });
