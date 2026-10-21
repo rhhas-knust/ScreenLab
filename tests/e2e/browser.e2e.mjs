@@ -880,6 +880,14 @@ try {
   check('Risk of bias: agreed appraisal stored separately from the extraction',
     sql(`select data->>'overall' from extraction_final where project_id='${projectId}' and kind='rob'`) === 'Low'
     && sql(`select data->>'tier' from extraction_final where project_id='${projectId}' and kind='extraction'`) === 'Tier 1');
+  await page.goto(`${APP}/p/${projectId}/extraction`);
+  await page.getByRole('tab', { name: 'Studies' }).click();
+  await page.getByTestId('extraction-row').filter({ hasText: `#${exSeq}` }).click();
+  await page.getByTestId('rob-embedded').waitFor();
+  check('Extraction page: shows the same study’s risk-of-bias appraisal under the extraction form',
+    /Complete/.test(await page.getByTestId('rob-status').textContent())
+    && await page.locator('#mine-rob-overall').inputValue() === 'Low');
+  await shot(page, '36b-extraction-with-rob');
   await page.goto(`${APP}/p/${projectId}/risk-of-bias?tab=plot`);
   await page.getByTestId('rob-plot').waitFor();
   check('Risk of bias: traffic-light plot draws one dot per item and the overall judgement', (await page.getByTestId('rob-plot').locator('svg').first().locator('circle').count()) >= 10);

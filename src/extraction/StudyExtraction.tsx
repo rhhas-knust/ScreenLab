@@ -51,8 +51,8 @@ function PaperPanel({ referenceId }: { referenceId: string }) {
 }
 
 /** Side-by-side comparison of completed extractions, and the agreed final version. */
-function Finalise({ kind, projectId, referenceId, form, sources, existing, names, onSaved }: {
-  kind: ModuleKind; projectId: string; referenceId: string; form: ExtractionForm; sources: Extraction[];
+function Finalise({ kind, projectId, referenceId, form, sources, existing, names, onSaved, testPrefix = '' }: {
+  testPrefix?: string; kind: ModuleKind; projectId: string; referenceId: string; form: ExtractionForm; sources: Extraction[];
   existing: ExtractionData | null; names: (id: string) => string; onSaved: () => void;
 }) {
   const toast = useToast();
@@ -69,7 +69,7 @@ function Finalise({ kind, projectId, referenceId, form, sources, existing, names
   };
   return (
     <Card className="space-y-3 p-4">
-      <div data-testid="finalise">
+      <div data-testid={`${testPrefix}finalise`}>
         <h3 className="font-semibold text-ink-900">{b ? `Compare and agree the final ${MODULES[kind].noun}` : `Final ${MODULES[kind].noun}`}</h3>
         <p className="text-sm text-slate-600">
           {b
@@ -100,19 +100,23 @@ function Finalise({ kind, projectId, referenceId, form, sources, existing, names
                       {differ && <Button size="sm" variant="ghost" onClick={() => set(fl.key, b.data[fl.key] ?? '')}>Use this</Button>}
                     </td>
                   )}
-                  <td className="py-2"><FieldInput field={fl} value={data[fl.key]} onChange={(v) => set(fl.key, v)} idPrefix="final" /></td>
+                  <td className="py-2"><FieldInput field={fl} value={data[fl.key]} onChange={(v) => set(fl.key, v)} idPrefix={`${testPrefix}final`} /></td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <Button variant="primary" onClick={save} loading={busy} data-testid="final-save">Save final {MODULES[kind].noun}</Button>
+      <Button variant="primary" onClick={save} loading={busy} data-testid={`${testPrefix}final-save`}>Save final {MODULES[kind].noun}</Button>
     </Card>
   );
 }
 
-export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) {
+/**
+ * One study's form for a module. `embedded` renders only the reviewer's form and the
+ * agreed-final step, so the risk-of-bias appraisal can sit under the extraction form.
+ */
+export function StudyExtraction({ kind = 'extraction', embedded = false }: { kind?: ModuleKind; embedded?: boolean }) {
   const M = MODULES[kind];
   const { projectId = '', refId = '' } = useParams();
   const nav = useNavigate();
@@ -130,8 +134,11 @@ export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) 
   useEffect(() => { setData(null); setDirty(false); }, [refId]);
   useEffect(() => { if (q.data && data === null) setData(q.data.mine?.data ?? {}); }, [q.data, data]);
 
-  if (!settings.data || !q.data || data === null) return <PageLoader />;
+  if (!settings.data || !q.data || data === null) return embedded ? null : <PageLoader />;
   if (!form) {
+    if (embedded) {
+      return <Alert kind="info">No {M.noun} form yet. <Link className="underline" to={`/p/${projectId}/${M.path}?tab=form`}>Set up the {M.title.toLowerCase()} form</Link>.</Alert>;
+    }
     return <div className="mx-auto max-w-3xl p-6"><EmptyState title={`No ${M.noun} form yet`} action={<Link className="underline" to={`/p/${projectId}/${M.path}?tab=form`}>Set up the form</Link>}>Choose or build the form first.</EmptyState></div>;
   }
   const { mine, others, final, me } = q.data;
@@ -168,6 +175,48 @@ export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) 
   };
   const refreshAll = () => Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId, kind) }), qc.invalidateQueries({ queryKey: xk.progress(projectId, kind) })]);
 
+  const formCard = (
+    <Card className="space-y-4 p-4">
+      <div className="flex items-center gap-2" data-testid={embedded ? `${kind}-form` : 'extraction-form'}>
+        <h3 className="flex-1 font-semibold text-ink-900">{embedded ? `${M.title}: your ${M.noun}` : `Your ${M.noun}`}</h3>
+        <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium', iAmComplete ? 'bg-emerald-50 text-emerald-800' : mine ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-slate-600')} data-testid={embedded ? `${kind}-status` : 'my-status'}>
+          {iAmComplete ? 'Complete' : mine ? 'Draft' : 'Not started'}
+        </span>
+        <span className="text-xs text-slate-500">{filled}/{form.fields.length} fields</span>
+      </div>
+      {form.fields.map((fl) => (
+        <div key={fl.key}>
+          <label htmlFor={`${embedded ? `mine-${kind}` : 'mine'}-${fl.key}`} className="block text-sm font-medium text-ink-900">{fl.label}</label>
+          {fl.help && <p className="mb-1 text-xs text-slate-500">{fl.help}</p>}
+          <FieldInput field={fl} value={data[fl.key]} idPrefix={embedded ? `mine-${kind}` : 'mine'} onChange={(v) => { setData({ ...data, [fl.key]: v }); setDirty(true); }} />
+        </div>
+      ))}
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t border-slate-100 bg-white px-4 pt-3">
+        <Button variant="secondary" onClick={() => save('draft')} loading={busy === 'draft'} disabled={!!busy}>Save draft</Button>
+        <Button variant="primary" onClick={() => save('complete')} loading={busy === 'complete'} disabled={!!busy} data-testid={embedded ? `${kind}-complete` : 'extraction-complete'}>
+          {iAmComplete ? 'Save changes' : 'Mark complete'}
+        </Button>
+      </div>
+    </Card>
+  );
+  const agreed = (
+    <>
+        {sources.length > 0 && (
+          <Finalise kind={kind} key={`${final?.updated_at ?? 'new'}-${sources.map((s) => s.updated_at).join()}`} projectId={projectId} referenceId={refId} form={form}
+            sources={sources} existing={final?.data ?? null} names={names} onSaved={refreshAll} testPrefix={embedded ? `${kind}-` : ''} />
+        )}
+        {final && (
+          <div className="text-right">
+            <Button size="sm" variant="ghost" onClick={async () => {
+              if (!window.confirm(`Remove the agreed final ${M.noun} for this study? The reviewers’ own answers are kept.`)) return;
+              try { await deleteFinal(refId, kind); await refreshAll(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); }
+            }}>Remove final {M.noun}</Button>
+          </div>
+        )}
+    </>
+  );
+  if (embedded) return <div className="space-y-4" data-testid={`${kind}-embedded`}>{formCard}{agreed}</div>;
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -196,42 +245,13 @@ export function StudyExtraction({ kind = 'extraction' }: { kind?: ModuleKind }) 
           )}
         </div>
 
-        <Card className="space-y-4 p-4">
-          <div className="flex items-center gap-2" data-testid="extraction-form">
-            <h3 className="flex-1 font-semibold text-ink-900">Your {M.noun}</h3>
-            <span className={cx('rounded-full px-2 py-0.5 text-xs font-medium', iAmComplete ? 'bg-emerald-50 text-emerald-800' : mine ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-slate-600')} data-testid="my-status">
-              {iAmComplete ? 'Complete' : mine ? 'Draft' : 'Not started'}
-            </span>
-            <span className="text-xs text-slate-500">{filled}/{form.fields.length} fields</span>
-          </div>
-          {form.fields.map((fl) => (
-            <div key={fl.key}>
-              <label htmlFor={`mine-${fl.key}`} className="block text-sm font-medium text-ink-900">{fl.label}</label>
-              {fl.help && <p className="mb-1 text-xs text-slate-500">{fl.help}</p>}
-              <FieldInput field={fl} value={data[fl.key]} idPrefix="mine" onChange={(v) => { setData({ ...data, [fl.key]: v }); setDirty(true); }} />
-            </div>
-          ))}
-          <div className="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t border-slate-100 bg-white px-4 pt-3">
-            <Button variant="secondary" onClick={() => save('draft')} loading={busy === 'draft'} disabled={!!busy}>Save draft</Button>
-            <Button variant="primary" onClick={() => save('complete')} loading={busy === 'complete'} disabled={!!busy} data-testid="extraction-complete">
-              {iAmComplete ? 'Save changes' : 'Mark complete'}
-            </Button>
-          </div>
-        </Card>
+        <div className="min-w-0 space-y-4">
+          {formCard}
+          {kind === 'extraction' && <StudyExtraction kind="rob" embedded key={`rob-${refId}`} />}
+        </div>
       </div>
 
-      {sources.length > 0 && (
-        <Finalise kind={kind} key={`${final?.updated_at ?? 'new'}-${sources.map((s) => s.updated_at).join()}`} projectId={projectId} referenceId={refId} form={form}
-          sources={sources} existing={final?.data ?? null} names={names} onSaved={refreshAll} />
-      )}
-      {final && (
-        <div className="text-right">
-          <Button size="sm" variant="ghost" onClick={async () => {
-            if (!window.confirm(`Remove the agreed final ${M.noun} for this study? The reviewers’ own answers are kept.`)) return;
-            try { await deleteFinal(refId, kind); await refreshAll(); } catch (e) { toast(friendlyError(e), { kind: 'error' }); }
-          }}>Remove final {M.noun}</Button>
-        </div>
-      )}
+      {agreed}
     </div>
   );
 }
