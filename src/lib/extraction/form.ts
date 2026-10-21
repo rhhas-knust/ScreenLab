@@ -26,9 +26,9 @@ export const OVERALL_KEY = 'overall';
 
 /** Data extraction and risk-of-bias appraisal share one engine (blinding, comparison, agreed final). */
 export type ModuleKind = 'extraction' | 'rob';
-export const MODULES: Record<ModuleKind, { title: string; path: string; settingsKey: string; noun: string; summaryKey: string }> = {
-  extraction: { title: 'Data extraction', path: 'extraction', settingsKey: 'extraction_form', noun: 'extraction', summaryKey: TIER_KEY },
-  rob: { title: 'Risk of bias', path: 'risk-of-bias', settingsKey: 'rob_form', noun: 'appraisal', summaryKey: OVERALL_KEY },
+export const MODULES: Record<ModuleKind, { title: string; path: string; settingsKey: string; noun: string; summaryKey: string; aiDraftsKey: string }> = {
+  extraction: { title: 'Data extraction', path: 'extraction', settingsKey: 'extraction_form', noun: 'extraction', summaryKey: TIER_KEY, aiDraftsKey: 'ai_extraction_drafts' },
+  rob: { title: 'Risk of bias', path: 'risk-of-bias', settingsKey: 'rob_form', noun: 'appraisal', summaryKey: OVERALL_KEY, aiDraftsKey: 'ai_rob_drafts' },
 };
 
 const JBI = ['Yes', 'No', 'Unclear', 'Not applicable'];
@@ -148,14 +148,13 @@ export function readForm(settings: { settings?: Record<string, unknown> } | unde
 
 /** A key for a new field, unique within the form. */
 /**
- * AI-drafted extractions, stored apart from reviewers' own work in
- * settings.ai_extraction_drafts keyed by reference id. A reviewer can copy one
+ * AI-drafted extractions and appraisals, stored apart from reviewers' own work in
+ * settings (MODULES[kind].aiDraftsKey) keyed by reference id. A reviewer can copy one
  * into their form to check; nothing is saved until they save it themselves.
  */
 export interface AiDraft { source: string; data: ExtractionData; created_at?: string }
-export const AI_DRAFTS_KEY = 'ai_extraction_drafts';
-export function readAiDraft(settings: { settings?: Record<string, unknown> } | undefined, referenceId: string): AiDraft | null {
-  const all = settings?.settings?.[AI_DRAFTS_KEY] as Record<string, unknown> | undefined;
+export function readAiDraft(settings: { settings?: Record<string, unknown> } | undefined, referenceId: string, kind: ModuleKind = 'extraction'): AiDraft | null {
+  const all = settings?.settings?.[MODULES[kind].aiDraftsKey] as Record<string, unknown> | undefined;
   const d = all?.[referenceId] as Partial<AiDraft> | undefined;
   if (!d || typeof d.data !== 'object' || d.data === null) return null;
   return { source: typeof d.source === 'string' ? d.source : '', data: d.data as ExtractionData, created_at: d.created_at };

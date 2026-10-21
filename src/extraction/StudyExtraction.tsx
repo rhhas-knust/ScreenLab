@@ -151,7 +151,7 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
   const iAmComplete = mine?.status === 'complete';
   const sources = iAmComplete ? [mine!, ...completeOthers] : !mine && completeOthers.length >= 2 ? completeOthers : [];
   const filled = form.fields.filter((fl) => !isEmpty(data[fl.key])).length;
-  const aiDraft = kind === 'extraction' && !iAmComplete ? readAiDraft(settings.data, refId) : null;
+  const aiDraft = !iAmComplete ? readAiDraft(settings.data, refId, kind) : null;
   const useAiDraft = () => {
     if (!aiDraft) return;
     const r = fillEmpty(form, data, aiDraft.data);
@@ -175,6 +175,16 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
   };
   const refreshAll = () => Promise.all([qc.invalidateQueries({ queryKey: xk.reference(refId, kind) }), qc.invalidateQueries({ queryKey: xk.progress(projectId, kind) })]);
 
+  const aiPanel = aiDraft && (
+    <div data-testid={`ai-draft-${kind}`}><Card className="space-y-2 border-violet-200 bg-violet-50 p-3">
+      <p className="text-sm font-semibold text-violet-900">AI draft available (suggestion only)</p>
+      <p className="text-xs text-violet-900">
+        Suggested {kind === 'rob' ? 'overall risk of bias' : 'tier'}: {display(aiDraft.data[M.summaryKey]) || 'not set'} · from {aiDraft.source || 'unknown source'}. It is not a reviewer’s {M.noun} and is not saved unless you save it.
+        Using it fills only your empty fields; verify every answer against the paper. Report AI assistance in your methods.
+      </p>
+      <Button size="sm" variant="secondary" onClick={useAiDraft}>Fill empty fields from AI draft</Button>
+    </Card></div>
+  );
   const formCard = (
     <Card className="space-y-4 p-4">
       <div className="flex items-center gap-2" data-testid={embedded ? `${kind}-form` : 'extraction-form'}>
@@ -184,6 +194,7 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
         </span>
         <span className="text-xs text-slate-500">{filled}/{form.fields.length} fields</span>
       </div>
+      {embedded && aiPanel}
       {form.fields.map((fl) => (
         <div key={fl.key}>
           <label htmlFor={`${embedded ? `mine-${kind}` : 'mine'}-${fl.key}`} className="block text-sm font-medium text-ink-900">{fl.label}</label>
@@ -233,16 +244,7 @@ export function StudyExtraction({ kind = 'extraction', embedded = false }: { kin
           {!iAmComplete && others.length > 0 && (
             <Alert kind="info">{others.length === 1 ? 'Another reviewer has' : `${others.length} reviewers have`} started this study. Their answers stay hidden until you mark yours complete, so the two {M.noun}s are independent.</Alert>
           )}
-          {aiDraft && (
-            <div data-testid="ai-draft"><Card className="space-y-2 border-violet-200 bg-violet-50 p-3">
-              <p className="text-sm font-semibold text-violet-900">AI draft available (suggestion only)</p>
-              <p className="text-xs text-violet-900">
-                Suggested {display(aiDraft.data.tier) || 'tier not set'} · from {aiDraft.source || 'unknown source'}. It is not a reviewer’s extraction and is not saved unless you save it.
-                Using it fills only your empty fields; verify every value against the paper. Report AI-assisted extraction in your methods.
-              </p>
-              <Button size="sm" variant="secondary" onClick={useAiDraft}>Fill empty fields from AI draft</Button>
-            </Card></div>
-          )}
+          {!embedded && aiPanel}
         </div>
 
         <div className="min-w-0 space-y-4">

@@ -86,6 +86,8 @@ describe('AI drafts', () => {
     expect(readAiDraft(s, 'r2')).toBeNull();
     expect(readAiDraft(s, 'missing')).toBeNull();
     expect(readAiDraft(undefined, 'r1')).toBeNull();
+    expect(readAiDraft({ settings: { ai_rob_drafts: { r1: { source: 's', data: { overall: 'Low' } } } } }, 'r1', 'rob')?.data.overall).toBe('Low');
+    expect(readAiDraft(s, 'r1', 'rob')).toBeNull();
   });
 
   it('fills only empty fields and never overwrites the reviewer', () => {

@@ -870,6 +870,13 @@ try {
   await page.getByTestId('extraction-row').filter({ hasText: `#${exSeq}` }).click();
   await page.getByTestId('extraction-title').waitFor();
   check('Risk of bias: own extraction does not count as an appraisal', /Not started/.test(await page.getByTestId('my-status').textContent()));
+  sql(`update project_settings set settings = settings || jsonb_build_object('ai_rob_drafts', jsonb_build_object((select id::text from study_references where project_id='${projectId}' and seq=${exSeq}), '{"source":"test draft","data":{"q2":"No","overall":"High"}}'::jsonb)) where project_id='${projectId}'`);
+  await page.reload();
+  await page.getByTestId('ai-draft-rob').waitFor();
+  await page.getByTestId('ai-draft-rob').getByRole('button', { name: 'Fill empty fields from AI draft' }).click();
+  check('Risk of bias: AI draft fills only empty answers and saves nothing by itself',
+    await page.getByRole('combobox', { name: /^Q2\./ }).inputValue() === 'No'
+    && sql(`select count(*) from extractions where project_id='${projectId}' and kind='rob'`) === '0');
   await page.getByRole('combobox', { name: /^Q1\./ }).selectOption('Yes');
   await page.getByRole('combobox', { name: /^Q7\./ }).selectOption('Unclear');
   await page.getByRole('combobox', { name: 'Overall risk of bias' }).selectOption('Low');
