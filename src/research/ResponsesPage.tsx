@@ -8,12 +8,14 @@ import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, Button, Card, EmptyState, PageLoader, Select, Stat, cx } from '../components/ui';
 import { applyFilters, categories, fieldStats, isCategorical, overview, type Filter } from '../lib/research/analytics';
 import { CrossTabPanel } from './CrossTabPanel';
+import { ChartStudio } from './ChartStudio';
 import { CodingPanel } from './CodingPanel';
 import { PerDayChart } from './Charts';
 import { QuestionStats } from './QuestionStats';
 import { AiSummaryCard } from './AiSummaryCard';
 import { useToast } from '../components/Toast';
 import { StatusBadge } from './StatusBadge';
+import { ShareResultsButton } from './ShareResultsDialog';
 
 export function ResponsesPage() {
   const { formId = '' } = useParams();
@@ -24,7 +26,7 @@ export function ResponsesPage() {
   const rq = useQuery({ queryKey: rk.responses(formId), queryFn: () => listResponses(formId), refetchInterval: 30_000 });
   const [params, setParams] = useSearchParams();
   const view = params.get('view');
-  const tab = view === 'table' || view === 'crosstab' || view === 'coding' ? view : 'summary';
+  const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' ? view : 'summary';
   const [filters, setFilters] = useState<Filter[]>([]);
   const filtered = useMemo(() => (fq.data && rq.data ? applyFilters(fq.data, rq.data, filters) : []), [fq.data, rq.data, filters]);
   const stats = useMemo(() => (fq.data ? fq.data.map((f) => fieldStats(f, filtered)) : []), [fq.data, filtered]);
@@ -66,6 +68,7 @@ export function ResponsesPage() {
         <Link to={`/research/${formId}/report`} className={cx('inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50', !responses.length && 'pointer-events-none opacity-50')} aria-disabled={!responses.length}>
           PDF report
         </Link>
+        <ShareResultsButton project={project} />
         <Button onClick={exportCsv} disabled={!filtered.length}>Download CSV (Excel/SPSS){isFiltered ? ` · ${filtered.length} filtered` : ''}</Button>
         <Button variant="ghost" onClick={() => rq.refetch()} loading={rq.isFetching}>Refresh</Button>
       </div>
@@ -77,7 +80,7 @@ export function ResponsesPage() {
       ) : (
         <>
           <div role="tablist" aria-label="Responses view" className="flex gap-1 border-b border-slate-200">
-            {([['summary', 'Summary'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['table', 'Individual responses']] as const).map(([k, label]) => (
+            {([['summary', 'Summary'], ['studio', 'Chart studio'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['table', 'Individual responses']] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams(k === 'summary' ? {} : { view: k }, { replace: true })}
                 className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-ink-700 text-ink-900' : 'border-transparent text-slate-600 hover:text-ink-900')}>
                 {label}
@@ -85,7 +88,9 @@ export function ResponsesPage() {
             ))}
           </div>
           <FilterBar fields={fields} filters={filters} onChange={setFilters} matched={filtered.length} total={responses.length} />
-          {tab === 'crosstab' ? (
+          {tab === 'studio' ? (
+            <ChartStudio key={params.get('x') ?? ''} title={project.title} fields={fields} responses={filtered} initialVar={params.get('x')} />
+          ) : tab === 'crosstab' ? (
             <CrossTabPanel title={project.title} fields={fields} responses={filtered} />
           ) : tab === 'coding' ? (
             <CodingPanel formId={formId} fields={fields} responses={filtered} allResponses={responses} />
@@ -105,7 +110,7 @@ export function ResponsesPage() {
               )}
               {!isFiltered && <AiSummaryCard formId={formId} responseCount={responses.length} />}
               <div className="space-y-3">
-                {stats.map((st, i) => <QuestionStats key={st.fieldId} s={st} index={i} />)}
+                {stats.map((st, i) => <QuestionStats key={st.fieldId} s={st} index={i} onChart={(x) => setParams({ view: 'studio', x }, { replace: true })} />)}
               </div>
             </div>
           ) : (
@@ -134,7 +139,7 @@ export function ResponsesPage() {
           )}
         </>
       )}
-      <p className="text-xs text-slate-500">Statistics are calculated from {isFiltered ? 'the filtered' : 'all'} responses. SD is the sample standard deviation. The CSV opens in Excel, SPSS, Stata or R.</p>
+      <p className="text-xs text-slate-500">Statistics are calculated from {isFiltered ? 'the filtered' : 'all'} responses. SD is the sample standard deviation. The CSV opens in Excel, SPSS, Stata or R; Chart studio also downloads MATLAB, R, SPSS and Stata scripts.</p>
     </div>
   );
 }

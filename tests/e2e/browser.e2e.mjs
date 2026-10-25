@@ -11,6 +11,7 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { unzipSync } from 'fflate';
 
 const APP = process.env.APP_URL ?? 'http://localhost:5173';
 const STACK = 'http://localhost:54321';
@@ -751,6 +752,63 @@ try {
   await page.getByText('peer support', { exact: true }).waitFor();
   check('ResearchHub v2: open answers can be coded into themes', sql(`select codes::text from rh_responses where project_id='${rhId}' and answers::text like '%Group A%'`).includes('peer support'));
   await shot(page, '32f-rh-coding');
+
+  // ResearchHub Chart Studio: MATLAB-style charts, tests and command window in the browser, plus downloads
+  await page.goto(`${APP}/research/${rhId}/responses`);
+  await page.getByTestId('rh-chart-this').nth(1).click();
+  await page.getByTestId('rh-studio').waitFor();
+  check('Chart studio: "Chart this" opens the question as a histogram', (await page.getByTestId('rh-studio-type').inputValue()) === 'histogram' && /n = 5, mean 13/.test(await page.getByTestId('rh-studio-stats').textContent()));
+  await page.getByTestId('rh-studio-cmd').fill('scatter(Q2, Q3)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  await page.getByText(/Pearson correlation: r = /).waitFor();
+  check('Chart studio: scatter command draws the figure with Pearson r', (await page.getByTestId('rh-studio-type').inputValue()) === 'scatter' && (await page.getByTestId('rh-studio-figure').locator('circle').count()) >= 4);
+  await page.getByTestId('rh-studio-cmd').fill('mean(Q2)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  await page.getByTestId('rh-studio-cmd').fill('bar(Q1, Q3)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  await page.getByTestId('rh-studio-cmd').fill('histogram(Q9)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  const studioLog = await page.getByTestId('rh-studio-log').textContent();
+  check('Chart studio: command window prints results and explains mistakes', /ans = 13/.test(studioLog) && /Undefined variable “Q9”/.test(studioLog), studioLog.slice(-300));
+  check('Chart studio: grouped bars show a legend and a chi-square test', /Chi-square test of independence/.test(await page.getByTestId('rh-studio-stats').textContent()));
+  await page.mouse.move(0, 0);
+  await shot(page, '32g-rh-chart-studio');
+  const [pngDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('rh-studio-png').click()]);
+  const pngBytes = fs.readFileSync(await pngDl.path());
+  check('Chart studio: figure downloads as a PNG image', pngBytes.subarray(1, 4).toString() === 'PNG' && pngBytes.length > 5000, `${pngBytes.length} bytes`);
+  const [packDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('rh-studio-pack').click()]);
+  const pack = unzipSync(fs.readFileSync(await packDl.path()));
+  check('Chart studio: analysis pack has data, codebook and MATLAB/R/SPSS/Stata scripts',
+    ['data.csv', 'codebook.csv', 'chart.m', 'chart.R', 'chart.sps', 'chart.do', 'README.txt'].every((f) => pack[f])
+    && /^Response,Q1,Q2,Q3,Q4,Q5,Q6_1,Q6_2,Submitted/.test(Buffer.from(pack['data.csv']).toString()) && /readtable\("data\.csv"/.test(Buffer.from(pack['chart.m']).toString()),
+    Object.keys(pack).join(','));
+  const [mDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('rh-studio-script-matlab').click()]);
+  check('Chart studio: MATLAB script alone downloads as chart.m', mDl.suggestedFilename() === 'chart.m' && /bar\(categorical\(xCats, xCats\), values\);/.test(fs.readFileSync(await mDl.path(), 'utf8')));
+
+  // Read-only results link for a supervisor
+  await page.getByTestId('rh-share-results').click();
+  await page.getByTestId('rh-results-on').click();
+  await page.getByTestId('rh-results-url').waitFor();
+  const resultsUrl = (await page.getByTestId('rh-results-url').inputValue()).replace(/^https?:\/\/[^/]+/, APP);
+  const sup = await browser.newContext();
+  const sp = await sup.newPage();
+  await sp.goto(resultsUrl);
+  await sp.getByTestId('rh-shared-results').waitFor();
+  const shared = await sp.getByTestId('rh-shared-results').textContent();
+  check('Results link: a supervisor sees the statistics without an account', /Survey results · read-only/.test(shared) && (await sp.getByTestId('rh-question-stats').count()) === 5);
+  check('Results link: open-text answers are hidden by default', !shared.includes('Group A') && !/Which study group/.test(shared));
+  const leak = await sp.evaluate(async ([u, k, tok]) => (await fetch(`${u}/rest/v1/rh_responses?select=*`, { headers: { apikey: k, Authorization: `Bearer ${k}` } })).text(), [STACK, fs.readFileSync('/tmp/sl-anon-key.txt', 'utf8').trim(), '']);
+  check('Results link: the responses table itself stays closed to the public', leak.trim() === '[]', leak.slice(0, 120));
+  await sp.getByRole('tab', { name: 'Chart studio' }).click();
+  await sp.getByTestId('rh-studio-figure').waitFor();
+  check('Results link: the supervisor can use the Chart studio', await visible(sp.getByTestId('rh-studio-pack')));
+  await shot(sp, '32h-rh-shared-results');
+  await page.getByTestId('rh-results-off').click();
+  await page.getByTestId('rh-results-on').waitFor();
+  await sp.reload();
+  check('Results link: turning it off stops the link at once', await visible(sp.getByText(/This results link is not valid/)));
+  await sup.close();
+  await page.keyboard.press('Escape');
 
   // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
   await page.goto(`${APP}/p/${projectId}/methods`);

@@ -78,6 +78,9 @@ export interface RhProject {
   max_responses: number | null;
   one_per_device: boolean;
   translations: Translations;
+  /** Read-only results link token (null = not shared). */
+  results_token?: string | null;
+  results_include_text?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -247,6 +250,33 @@ export function deviceToken(): string {
 
 export function publicFormUrl(id: string): string {
   return `${window.location.origin}/f/${id}`;
+}
+
+export function sharedResultsUrl(token: string): string {
+  return `${window.location.origin}/r/${token}`;
+}
+
+/** What a read-only results link shows: no email answers, and open text only if the owner allowed it. */
+export interface SharedResults {
+  title: string;
+  description: string | null;
+  university: string | null;
+  department: string | null;
+  year: string | null;
+  status: FormStatus;
+  include_text: boolean;
+  fields: RhField[];
+  responses: RhResponse[];
+}
+
+export async function getSharedResults(token: string): Promise<SharedResults | null> {
+  const r = must(await supabase.rpc('rh_shared_results', { p_token: token })) as SharedResults | null;
+  return r && { ...r, fields: r.fields.map((f) => ({ ...f, settings: f.settings ?? {} })) };
+}
+
+/** Turn the results link on (a fresh token each time, which retires any old link) or off. */
+export async function setResultsSharing(id: string, on: boolean, includeText = false): Promise<RhProject> {
+  return updateRhProject(id, { results_token: on ? crypto.randomUUID() : null, results_include_text: on && includeText });
 }
 
 export function answerText(v: AnswerValue | undefined): string {

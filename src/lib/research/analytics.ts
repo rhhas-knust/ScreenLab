@@ -41,7 +41,7 @@ export interface DateStats extends Base { kind: 'date'; earliest: string | null;
 export interface Theme { code: string; count: number; pct: number }
 export type FieldStats = (NumericStats | ChoiceStats | MultiStats | TextStats | GridStats | RankingStats | DateStats) & { themes?: Theme[] };
 
-const isBlank = (v: AnswerValue | undefined) =>
+export const isBlank = (v: AnswerValue | undefined) =>
   v == null || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' ? Object.keys(v).length === 0 : String(v).trim() === '');
 
 export const round = (n: number, dp = 2) => Math.round(n * 10 ** dp) / 10 ** dp;
@@ -263,7 +263,7 @@ export function chiSquareP(x: number, df: number): number {
   return gammaQ(df / 2, x / 2);
 }
 
-function logGamma(z: number): number {
+export function logGamma(z: number): number {
   const g = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
   let x = z, y = z;
   let tmp = x + 5.5;

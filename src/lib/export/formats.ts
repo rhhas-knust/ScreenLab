@@ -100,7 +100,10 @@ export function referencesToJson(refs: Reference[]): string {
 }
 
 export function downloadText(filename: string, text: string, mime: string) {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  downloadBlob(filename, new Blob([text], { type: `${mime};charset=utf-8` }));
+}
+
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

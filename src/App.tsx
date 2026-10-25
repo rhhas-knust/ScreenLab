@@ -31,6 +31,7 @@ import { FormBuilderPage } from './research/FormBuilderPage';
 import { ResponsesPage } from './research/ResponsesPage';
 import { PublicFormPage } from './research/PublicFormPage';
 import { ReportPage } from './research/ReportPage';
+import { SharedResultsPage } from './research/SharedResultsPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -123,6 +124,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/" element={<Navigate to="/projects" replace />} />
       <Route path="/f/:formId" element={<PublicFormPage />} />
+      <Route path="/r/:token" element={<SharedResultsPage />} />
       <Route path="/research/:formId/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
       <Route path="/p/:projectId/methods/search-strategy" element={<RequireAuth><SearchStrategyPage /></RequireAuth>} />
       <Route path="/p/:projectId/methods/protocol" element={<RequireAuth><ProtocolPage /></RequireAuth>} />

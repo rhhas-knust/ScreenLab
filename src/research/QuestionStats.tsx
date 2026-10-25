@@ -8,13 +8,21 @@ const th = 'px-2 py-1 text-left text-xs font-semibold text-slate-600';
 const td = 'border-t border-slate-100 px-2 py-1 tabular-nums';
 
 /** One question's statistics: numbers first, then the distribution. Used on screen and in the printed report. */
-export function QuestionStats({ s, index }: { s: FieldStats; index: number }) {
+export function QuestionStats({ s, index, onChart }: { s: FieldStats; index: number; onChart?: (variable: string) => void }) {
   const total = s.answered + s.missing;
+  // Chart Studio names: Q1, Q2 …; grids and rankings open on their first part (Q4_1).
+  const chartable = s.answered > 0 && s.type !== 'text' && s.type !== 'textarea' && s.type !== 'email';
+  const variable = `Q${index + 1}${s.type === 'grid' || s.type === 'ranking' ? '_1' : ''}`;
   return (
     <article className="break-inside-avoid space-y-3 rounded-xl border border-slate-200 bg-white p-4" data-testid="rh-question-stats">
-      <header>
+      <header className="relative">
+        {onChart && chartable && (
+          <button type="button" onClick={() => onChart(variable)} className="absolute top-0 right-0 rounded-md px-2 py-0.5 text-xs font-medium text-ink-700 hover:bg-ink-50 print:hidden" data-testid="rh-chart-this">
+            Chart this →
+          </button>
+        )}
         <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Q{index + 1} · {FIELD_LABEL[s.type]}</p>
-        <h3 className="mt-0.5 font-semibold text-ink-900">{s.label}</h3>
+        <h3 className="mt-0.5 pr-20 font-semibold text-ink-900">{s.label}</h3>
         <p className="text-xs text-slate-500">
           {s.answered} of {total} answered{s.missing ? ` · ${s.missing} skipped or not shown` : ''}
         </p>
