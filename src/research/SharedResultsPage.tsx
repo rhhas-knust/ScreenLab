@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getSharedResults } from '../lib/api/research';
 import { fieldStats, overview } from '../lib/research/analytics';
+import { scoreResponses } from '../lib/research/formula';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, PageLoader, Stat, cx } from '../components/ui';
@@ -16,7 +17,7 @@ export function SharedResultsPage() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('view') === 'studio' ? 'studio' : 'summary';
   const q = useQuery({ queryKey: ['rh', 'shared', token], queryFn: () => getSharedResults(token), retry: 1 });
-  const d = q.data;
+  const d = useMemo(() => (q.data ? { ...q.data, responses: scoreResponses(q.data.fields, q.data.responses) } : q.data), [q.data]);
   const stats = useMemo(() => (d ? d.fields.map((f) => fieldStats(f, d.responses)) : []), [d]);
   const ov = useMemo(() => (d ? overview(d.fields, d.responses) : null), [d]);
   useEffect(() => {

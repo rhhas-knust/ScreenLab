@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getRhProject, latestSummary, listFields, listResponses, rk } from '../lib/api/research';
 import { fieldStats, overview } from '../lib/research/analytics';
+import { scoreResponses } from '../lib/research/formula';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, Button, PageLoader } from '../components/ui';
@@ -21,8 +22,9 @@ export function ReportPage() {
   const fq = useQuery({ queryKey: rk.fields(formId), queryFn: () => listFields(formId) });
   const rq = useQuery({ queryKey: rk.responses(formId), queryFn: () => listResponses(formId) });
   const sq = useQuery({ queryKey: rk.summary(formId), queryFn: () => latestSummary(formId) });
-  const stats = useMemo(() => (fq.data && rq.data ? fq.data.map((f) => fieldStats(f, rq.data)) : []), [fq.data, rq.data]);
-  const ov = useMemo(() => (fq.data && rq.data ? overview(fq.data, rq.data) : null), [fq.data, rq.data]);
+  const scored = useMemo(() => (fq.data && rq.data ? scoreResponses(fq.data, rq.data) : null), [fq.data, rq.data]);
+  const stats = useMemo(() => (fq.data && scored ? fq.data.map((f) => fieldStats(f, scored)) : []), [fq.data, scored]);
+  const ov = useMemo(() => (fq.data && scored ? overview(fq.data, scored) : null), [fq.data, scored]);
 
   useEffect(() => {
     if (pq.data) document.title = `${pq.data.title} — findings report`;

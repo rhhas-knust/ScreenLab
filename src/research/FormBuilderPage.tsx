@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   UNIVERSITIES, deleteRhProject, getRhProject, hasOptions, listFields, listResponses, rk, saveFields, updateRhProject,
-  type RhField, type RhProject,
+  type FormOptions, type RhField, type RhProject,
 } from '../lib/api/research';
 import { conditionProblems } from '../lib/research/logic';
+import { formulaProblem } from '../lib/research/formula';
+import { QuotasEditor } from './QuotasEditor';
+import { InvitePanel } from './InvitePanel';
 import { fmtDate } from '../lib/hooks';
 import { friendlyError } from '../lib/errors';
 import { Alert, Button, Card, Input, Label, PageLoader, Select, Textarea } from '../components/ui';
@@ -17,7 +20,7 @@ import { StatusBadge } from './StatusBadge';
 import { TranslationsEditor } from './TranslationsEditor';
 
 type Details = Pick<RhProject, 'title' | 'description' | 'university' | 'department' | 'year' | 'thank_you_message'
-  | 'consent_text' | 'closes_at' | 'max_responses' | 'one_per_device' | 'translations'>;
+  | 'consent_text' | 'closes_at' | 'max_responses' | 'one_per_device' | 'translations'> & { form_options: FormOptions };
 
 const newField = (projectId: string): RhField => ({
   id: crypto.randomUUID(), project_id: projectId, label: '', help: null, type: 'text', options: [], required: false, field_order: 0, settings: {},
@@ -38,6 +41,12 @@ function problems(d: Details, fields: RhField[]): string[] {
     if (!f.label.trim()) out.push(`Question ${i + 1} has no text.`);
     if (hasOptions(f.type) && f.options.length < (f.type === 'ranking' ? 2 : 1)) out.push(`Question ${i + 1} needs at least ${f.type === 'ranking' ? 'two options' : 'one option'}.`);
     if (f.type === 'grid' && !(f.settings?.rows ?? []).some((r) => r.trim())) out.push(`Question ${i + 1} needs at least one statement.`);
+    if (f.type === 'calc') { const e = formulaProblem(f.settings?.formula, fields, i); if (e) out.push(`Question ${i + 1} (score): ${e}`); }
+  });
+  (d.form_options.quotas ?? []).forEach((q, i) => {
+    if (!fields.some((f) => f.id === q.field)) out.push(`Quota ${i + 1} uses a question that was deleted.`);
+    else if (!q.value) out.push(`Quota ${i + 1}: choose the answer it counts.`);
+    else if (!Number.isInteger(q.limit) || q.limit < 1) out.push(`Quota ${i + 1}: the limit must be a whole number of 1 or more.`);
   });
   out.push(...conditionProblems(fields));
   if (d.max_responses != null && (!Number.isInteger(d.max_responses) || d.max_responses < 1)) out.push('The response limit must be a whole number of 1 or more.');
@@ -65,7 +74,7 @@ export function FormBuilderPage() {
       setDetails({
         title: p.title, description: p.description, university: p.university, department: p.department, year: p.year, thank_you_message: p.thank_you_message,
         consent_text: p.consent_text ?? null, closes_at: p.closes_at ?? null, max_responses: p.max_responses ?? null,
-        one_per_device: p.one_per_device ?? false, translations: p.translations ?? {},
+        one_per_device: p.one_per_device ?? false, translations: p.translations ?? {}, form_options: p.form_options ?? {},
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,6 +128,7 @@ export function FormBuilderPage() {
         department: details.department?.trim() || null, year: details.year?.trim() || null, thank_you_message: details.thank_you_message?.trim() || null,
         consent_text: details.consent_text?.trim() || null, closes_at: details.closes_at, max_responses: details.max_responses,
         one_per_device: details.one_per_device, translations: details.translations,
+        form_options: { randomize_questions: !!details.form_options.randomize_questions, quotas: details.form_options.quotas ?? [] },
       };
       if (status) patch.status = status;
       if (status === 'active' && !project.published_at) patch.published_at = new Date().toISOString();
@@ -166,6 +176,7 @@ export function FormBuilderPage() {
       <h1 className="text-2xl font-semibold text-ink-900">{project.title}</h1>
 
       {project.status !== 'draft' && <SharePanel project={project} />}
+      {project.status !== 'draft' && <InvitePanel project={project} />}
       {autoClosed && <Alert kind="info">{autoClosed}, so the form is no longer taking responses. Change the closing rules below and save to reopen it.</Alert>}
       {responseCount > 0 && <Alert kind="info">This questionnaire has {responseCount} response{responseCount === 1 ? '' : 's'}. Editing questions now may make earlier and later answers inconsistent.</Alert>}
 
@@ -180,6 +191,7 @@ export function FormBuilderPage() {
             id: formId, status: project.status, university: details.university, department: details.department, thank_you_message: details.thank_you_message,
             title: details.title, description: details.description, consent_text: details.consent_text, closes_at: details.closes_at,
             one_per_device: details.one_per_device, translations: details.translations, closed_reason: null, fields: fields.filter((f) => f.label.trim()),
+            randomize_questions: !!details.form_options.randomize_questions,
           }} />
         </div>
       ) : (
@@ -249,6 +261,20 @@ export function FormBuilderPage() {
             </label>
           </Card>
 
+          <Card className="space-y-3 p-4">
+            <h2 className="font-semibold text-ink-900">Order and quotas</h2>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-0.5" checked={!!details.form_options.randomize_questions}
+                onChange={(e) => editDetails({ form_options: { ...details.form_options, randomize_questions: e.target.checked } })} data-testid="rh-randomize" />
+              <span>
+                Show the questions in a random order
+                <span className="block text-xs text-slate-500">Each respondent gets their own order, which reduces order effects. A follow-up question (skip logic) always stays right after its question, and scores stay at the end. To shuffle the answers inside one question, tick that on the question.</span>
+              </span>
+            </label>
+            <QuotasEditor fields={fields} quotas={details.form_options.quotas ?? []} responses={rq.data ?? []}
+              onChange={(quotas) => editDetails({ form_options: { ...details.form_options, quotas } })} />
+          </Card>
+
           <TranslationsEditor value={details.translations} onChange={(t) => editDetails({ translations: t })} fields={fields}
             base={{ title: details.title, description: details.description, consent_text: details.consent_text, thank_you_message: details.thank_you_message }} />
 
@@ -256,7 +282,7 @@ export function FormBuilderPage() {
             <h2 className="font-semibold text-ink-900">Questions ({fields.length})</h2>
             {fields.length === 0 && <p className="text-sm text-slate-500">No questions yet — add your first question below.</p>}
             {fields.map((f, i) => (
-              <FieldEditor key={f.id} field={f} index={i} count={fields.length} earlier={fields.slice(0, i)} hasResponses={responseCount > 0}
+              <FieldEditor key={f.id} field={f} index={i} count={fields.length} earlier={fields.slice(0, i)} all={fields} hasResponses={responseCount > 0}
                 onChange={(p) => patchField(i, p)} onMove={(d) => move(i, d)}
                 onRemove={() => editFields(fields.filter((_, j) => j !== i))}
                 onDuplicate={() => editFields([...fields.slice(0, i + 1), { ...f, id: crypto.randomUUID(), settings: { ...f.settings } }, ...fields.slice(i + 1)])} />

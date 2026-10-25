@@ -54,6 +54,8 @@ create table if not exists storage.objects (
 );
 alter table storage.objects enable row level security;
 grant select, insert, update, delete on storage.objects to authenticated;
+-- As on Supabase: anon may insert, subject to the bucket's RLS policies (public form uploads).
+grant insert on storage.objects to anon;
 grant select on storage.buckets to authenticated;
 create or replace function storage.foldername(name text) returns text[] language sql immutable as $$
   select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1]

@@ -810,6 +810,142 @@ try {
   await sup.close();
   await page.keyboard.press('Escape');
 
+  // ---------------------------------------------------------------- ResearchHub Phase 2
+  // Scores, piping, random order, quotas, file + signature questions, offline collection, invitations.
+  fs.rmSync('/tmp/sl-outbox.jsonl', { force: true });
+  await page.goto(`${APP}/research`);
+  await page.getByLabel('New questionnaire').fill('Wellbeing check');
+  await page.getByRole('button', { name: 'Create questionnaire' }).click();
+  await page.getByRole('heading', { name: 'Wellbeing check' }).waitFor();
+  const wbId = page.url().split('/research/')[1];
+  const addQ = async (n, label, type) => {
+    await page.getByRole('button', { name: '+ Add question' }).click();
+    await page.getByLabel(`Question ${n}`, { exact: true }).fill(label);
+    if (type) await page.getByLabel('Answer type').nth(n - 1).selectOption(type);
+  };
+  await addQ(1, 'Which level are you in?', 'radio');
+  await page.getByLabel('Options').fill('100\n200');
+  await page.getByText('Required').nth(0).click();
+  await addQ(2, 'Hours of sleep last night', 'number');
+  await addQ(3, 'You sleep {Q2} hours. How rested do you feel?', 'scale');
+  await addQ(4, 'Wellbeing score', 'calc');
+  await page.getByLabel('Formula').fill('Q2 + Q3');
+  await page.getByLabel('Show the score to the respondent').check();
+  await addQ(5, 'Photo of your timetable', 'file');
+  await addQ(6, 'Sign to confirm', 'signature');
+  await page.getByTestId('rh-randomize').check();
+  await page.getByTestId('rh-add-quota').click();
+  await page.getByLabel('Quota 1 answer').selectOption('100');
+  await page.getByLabel('Quota 1 limit').fill('1');
+  check('Phase 2: formula is shown with question numbers', (await page.getByLabel('Formula').inputValue()) === 'Q2 + Q3');
+  await shot(page, '35a-rh-phase2-builder');
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await page.getByTestId('rh-share-url').waitFor();
+  const wbFields = Object.fromEntries(sql(`select string_agg(field_order || '=' || id::text, ',') from rh_fields where project_id='${wbId}'`).split(',').map((kv) => kv.split('=')));
+  check('Phase 2: formula and piping are stored with question ids, not numbers',
+    sql(`select settings->>'formula' from rh_fields where id='${wbFields[3]}'`) === `@${wbFields[1]} + @${wbFields[2]}`
+    && sql(`select label from rh_fields where id='${wbFields[2]}'`).includes(`{@${wbFields[1]}}`));
+  check('Phase 2: random order and quota saved', sql(`select (form_options->>'randomize_questions') || ',' || (form_options->'quotas'->0->>'limit') from rh_projects where id='${wbId}'`) === 'true,1');
+
+  // Respondent 1: piping, live score, file and signature
+  const r1c = await browser.newContext({ viewport: { width: 1100, height: 900 } });
+  const r1 = await r1c.newPage();
+  await r1.goto(`${APP}/f/${wbId}`);
+  await r1.getByRole('heading', { name: 'Wellbeing check' }).waitFor();
+  check('Phase 2: score question is not asked, the other five are', (await r1.getByTestId('rh-form-question').count()) === 5);
+  await r1.getByLabel('100').check();
+  await r1.getByRole('textbox', { name: /Hours of sleep/ }).fill('7');
+  check('Phase 2: piping puts the earlier answer into the question', await visible(r1.getByText('You sleep 7 hours. How rested do you feel?')));
+  await r1.getByTestId('rh-form-question').filter({ hasText: 'How rested' }).getByText('4', { exact: true }).click();
+  check('Phase 2: the score updates as people answer', /11/.test(await r1.getByTestId('rh-score').textContent()));
+  await r1.locator('input[type=file]').setInputFiles({ name: 'timetable.png', mimeType: 'image/png', buffer: fs.readFileSync('public/icon-192.png') });
+  const pad = await r1.getByTestId('rh-signature').locator('canvas').boundingBox();
+  await r1.mouse.move(pad.x + 20, pad.y + 40); await r1.mouse.down();
+  await r1.mouse.move(pad.x + 120, pad.y + 90, { steps: 8 }); await r1.mouse.move(pad.x + 220, pad.y + 30, { steps: 8 }); await r1.mouse.up();
+  await r1.getByText('Signed.').waitFor();
+  await shot(r1, '35b-rh-phase2-form');
+  await r1.getByRole('button', { name: 'Submit' }).click();
+  await r1.getByRole('heading', { name: 'Thank you!' }).waitFor();
+  check('Phase 2: respondent sees their score at the end', /Wellbeing score\s*11/.test(await r1.getByTestId('rh-final-scores').textContent()));
+  await r1c.close();
+  const wbRow = sql(`select answers::text from rh_responses where project_id='${wbId}'`);
+  check('Phase 2: file and signature are stored privately and linked to the answer',
+    sql(`select count(*) from storage.objects where bucket_id='rh-uploads' and name like '${wbId}/%'`) === '2' && /timetable\.png/.test(wbRow) && /signature\.png/.test(wbRow));
+  check('Phase 2: the score itself is not stored (it is worked out from the answers)', !wbRow.includes(wbFields[3]));
+  const anonList = await page.evaluate(async ([u, k, pfx]) => (await fetch(`${u}/storage/v1/object/sign/rh-uploads/${pfx}`, { method: 'POST', headers: { apikey: k, Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: '{"expiresIn":60}' })).status,
+    [STACK, fs.readFileSync('/tmp/sl-anon-key.txt', 'utf8').trim(), sql(`select name from storage.objects where bucket_id='rh-uploads' and name like '${wbId}/%' limit 1`)]);
+  check('Phase 2: the public cannot open uploaded files', anonList >= 400, String(anonList));
+
+  // Respondent 2: the "100" group is full
+  const r2c = await browser.newContext();
+  const r2 = await r2c.newPage();
+  await r2.goto(`${APP}/f/${wbId}`);
+  await r2.getByLabel('100').check();
+  check('Phase 2: a full quota group is thanked straight away', await visible(r2.getByText(/already have all the responses we need from people who answered “100”/)));
+  const quotaRpc = await r2.evaluate(async ([u, k, id, fid]) => (await (await fetch(`${u}/rest/v1/rpc/rh_submit_response`, { method: 'POST', headers: { apikey: k, Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_project_id: id, p_answers: { [fid]: '100' }, p_meta: {} }) })).text()),
+    [STACK, fs.readFileSync('/tmp/sl-anon-key.txt', 'utf8').trim(), wbId, wbFields[0]]);
+  check('Phase 2: the server enforces the quota too', /already have all the responses/.test(quotaRpc), quotaRpc.slice(0, 120));
+
+  // Respondent 2 continues offline (fieldwork): the answer waits on the device, then syncs
+  await r2.getByLabel('200').check();
+  await r2.getByRole('textbox', { name: /Hours of sleep/ }).fill('6');
+  await r2c.setOffline(true);
+  await r2.getByRole('button', { name: 'Submit' }).click();
+  await r2.getByText(/Your answers are saved on this device/).waitFor();
+  check('Phase 2: offline, the response is kept on the device', /1 response saved on this device/.test(await r2.getByTestId('rh-outbox').textContent()) && sql(`select count(*) from rh_responses where project_id='${wbId}'`) === '1');
+  await shot(r2, '35c-rh-offline');
+  await r2c.setOffline(false);
+  await r2.getByText(/1 saved response sent/).waitFor({ timeout: 15000 }).catch(() => {});
+  check('Phase 2: back online, it is sent automatically (once, with the time it was filled in)',
+    sql(`select count(*) || ',' || count(collected_at) from rh_responses where project_id='${wbId}'`) === '2,1');
+  await r2c.close();
+
+  // Owner: scores in the statistics, files open privately, quota status
+  await page.goto(`${APP}/research/${wbId}/responses`);
+  await page.getByTestId('rh-question-stats').first().waitFor();
+  const scoreCard = await page.getByTestId('rh-question-stats').filter({ hasText: 'Wellbeing score' }).textContent();
+  check('Phase 2: the score has statistics like a number question', /Mean11/.test(scoreCard), scoreCard.slice(0, 120));
+  check('Phase 2: quota progress is shown', /1 \/ 1/.test(await page.getByTestId('rh-quota-status').textContent()));
+  await page.getByRole('tab', { name: 'Individual responses' }).click();
+  const [filePopup] = await Promise.all([page.waitForEvent('popup'), page.getByTestId('rh-file-link').first().click()]);
+  await filePopup.waitForLoadState().catch(() => {});
+  check('Phase 2: the owner opens an uploaded file through a private link', /\/object\/sign\/rh-uploads\//.test(filePopup.url()), filePopup.url().slice(0, 100));
+  await filePopup.close();
+
+  // Invitations and reminders
+  await page.goto(`${APP}/research/${wbId}`);
+  await page.getByTestId('rh-invites-toggle').click();
+  await page.getByLabel(/Add people/).fill('Ama Mensah, ama@example.com\nkofi@example.com');
+  await page.getByTestId('rh-inv-add').click();
+  await page.getByTestId('rh-invite-row').nth(1).waitFor();
+  page.once('dialog', (d) => d.accept());
+  await page.getByTestId('rh-inv-send').click();
+  await page.getByText(/2 invitations sent/).waitFor();
+  const outbox = () => fs.readFileSync('/tmp/sl-outbox.jsonl', 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  check('Phase 2: invitations are emailed with personal links', outbox().length === 2 && outbox().every((m) => /\/f\/.+\?i=[0-9a-f-]{36}$/.test(m.link)));
+  const amaLink = outbox().find((m) => m.to === 'ama@example.com').link.replace(/^https?:\/\/[^/]+/, APP);
+  const ic = await browser.newContext();
+  const ip = await ic.newPage();
+  await ip.goto(amaLink);
+  await ip.getByLabel('200').check();
+  await ip.getByRole('button', { name: 'Submit' }).click();
+  await ip.getByRole('heading', { name: 'Thank you!' }).waitFor();
+  check('Phase 2: responding through a personal link marks the person as responded (answers stay anonymous)',
+    sql(`select responded_on is not null from rh_invites where email='ama@example.com'`) === 't' && sql(`select count(*) from information_schema.columns where table_name='rh_responses' and column_name like '%invite%'`) === '0');
+  await ip.goto(amaLink);
+  await ip.getByLabel('200').check();
+  await ip.getByRole('button', { name: 'Submit' }).click();
+  check('Phase 2: a personal link can only be used once', await visible(ip.getByText(/personal link has already been used/)));
+  await ic.close();
+  await page.reload();
+  await page.getByTestId('rh-invites-toggle').click();
+  check('Phase 2: the list shows who has responded', /2 on the list · 1 responded/.test(await page.getByTestId('rh-invite-stats').textContent()));
+  page.once('dialog', (d) => d.accept());
+  await page.getByTestId('rh-inv-remind').click();
+  await page.getByText(/1 reminder sent/).waitFor();
+  check('Phase 2: reminders go only to people who have not responded', outbox().length === 3 && outbox()[2].to === 'kofi@example.com' && outbox()[2].kind === 'reminder');
+  await shot(page, '35d-rh-invitations');
+
   // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
   await page.goto(`${APP}/p/${projectId}/methods`);
   await page.getByTestId('prisma-diagram').locator('svg').waitFor();

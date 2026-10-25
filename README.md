@@ -167,6 +167,33 @@ survey data for their project:
    sent. It uses the same `ANTHROPIC_API_KEY` secret as the AI assistant (about $0.05–0.15 per
    summary) and is saved so it appears in the report. Check every statement before using it.
 
+7. **Chart studio** — MATLAB-style charts and tests in the browser (bar, pie, histogram, box
+   plot, means with 95% CI, scatter with trend line, heatmap; chi-square, Welch t, ANOVA,
+   Pearson r), a command window (`bar(Q1, Q3)`, `ttest2(Q2, Q1)` …), PNG/SVG downloads and a
+   zip with data, a codebook and MATLAB / R / SPSS / Stata scripts. *Share results* gives a
+   supervisor a read-only link.
+8. **Phase 2 tools**
+   - *Calculated scores* — a question of type “Calculated score” with a formula such as
+     `Q2 + Q3` or `mean(Q4_1, Q4_2)`; worked out from the answers (never stored), so results,
+     charts and downloads are always up to date. Optionally shown to the respondent.
+   - *Piping* — type `{Q2}` in a question to show that earlier answer.
+   - *Random order* — of the questions (follow-up questions stay with their question) and of
+     the answers inside a question (optionally keeping “Other” last).
+   - *Quotas* — e.g. at most 50 from Level 100; enforced on the server, people in a full
+     group are thanked and turned away.
+   - *File upload and signature questions* — up to 10 MB, kept in the private `rh-uploads`
+     bucket that only the owner can open; never shown on a results link.
+   - *Offline collection* — open the link once online; after that, answers given without
+     internet are kept on the device and sent automatically when the connection returns
+     (each is stored once, with the time it was filled in).
+   - *Invitations and reminders* — paste a list of people; each gets a personal link, so you
+     see who has responded and remind only the others. Only *that* someone responded is
+     recorded, never which response is theirs. Emails are sent by the `rh-invite` Edge
+     Function through [Resend](https://resend.com): add the secrets `RESEND_API_KEY` and
+     `RH_EMAIL_FROM` (e.g. `ResearchHub <survey@your-domain.org>`, a domain verified in
+     Resend). Without them, download the links for a Gmail/Outlook mail merge or use the
+     per-person email and WhatsApp buttons.
+
 Security: questionnaires and answers are private to their owner (Row Level Security).
 Respondents can only load a published questionnaire and submit through a server function that
 checks every answer (required questions, number/email format, allowed options, scale 1–5),

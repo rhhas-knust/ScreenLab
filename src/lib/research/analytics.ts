@@ -38,8 +38,10 @@ export interface RankingStats extends Base {
   items: { label: string; meanRank: number | null; first: number; firstPct: number }[];
 }
 export interface DateStats extends Base { kind: 'date'; earliest: string | null; latest: string | null; bars: Bar[] }
+/** File-upload and signature questions: only how many were given (the files open from the responses table). */
+export interface FileStats extends Base { kind: 'files' }
 export interface Theme { code: string; count: number; pct: number }
-export type FieldStats = (NumericStats | ChoiceStats | MultiStats | TextStats | GridStats | RankingStats | DateStats) & { themes?: Theme[] };
+export type FieldStats = (NumericStats | ChoiceStats | MultiStats | TextStats | GridStats | RankingStats | DateStats | FileStats) & { themes?: Theme[] };
 
 export const isBlank = (v: AnswerValue | undefined) =>
   v == null || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' ? Object.keys(v).length === 0 : String(v).trim() === '');
@@ -96,7 +98,9 @@ export function fieldStats(field: RhField, responses: RhResponse[]): FieldStats 
   const values = responses.map((r) => r.answers[field.id]).filter((v) => !isBlank(v));
   const base = { fieldId: field.id, label: field.label, type: field.type, answered: values.length, missing: responses.length - values.length };
 
-  if (field.type === 'number' || field.type === 'scale') {
+  if (field.type === 'file' || field.type === 'signature') return { ...base, kind: 'files' };
+
+  if (field.type === 'number' || field.type === 'scale' || field.type === 'calc') {
     const xs = values.map((v) => Number(v)).filter((n) => Number.isFinite(n));
     return {
       ...base, kind: 'numeric', mean: mean(xs), median: median(xs), sd: sd(xs),

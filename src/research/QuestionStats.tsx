@@ -11,7 +11,7 @@ const td = 'border-t border-slate-100 px-2 py-1 tabular-nums';
 export function QuestionStats({ s, index, onChart }: { s: FieldStats; index: number; onChart?: (variable: string) => void }) {
   const total = s.answered + s.missing;
   // Chart Studio names: Q1, Q2 …; grids and rankings open on their first part (Q4_1).
-  const chartable = s.answered > 0 && s.type !== 'text' && s.type !== 'textarea' && s.type !== 'email';
+  const chartable = s.answered > 0 && !['text', 'textarea', 'email', 'file', 'signature'].includes(s.type);
   const variable = `Q${index + 1}${s.type === 'grid' || s.type === 'ranking' ? '_1' : ''}`;
   return (
     <article className="break-inside-avoid space-y-3 rounded-xl border border-slate-200 bg-white p-4" data-testid="rh-question-stats">
@@ -80,6 +80,8 @@ export function QuestionStats({ s, index, onChart }: { s: FieldStats; index: num
           <p className="text-sm text-slate-700">Earliest {s.earliest} · latest {s.latest}</p>
           <BarList bars={s.bars} caption={`Answers to: ${s.label}, by month`} />
         </>
+      ) : s.kind === 'files' ? (
+        <p className="text-sm text-slate-700" data-testid="rh-file-stats">{s.answered} {s.type === 'signature' ? 'signature' : 'file'}{s.answered === 1 ? '' : 's'} received. Open them from <span className="font-medium">Individual responses</span>.</p>
       ) : s.type === 'email' ? (
         <p className="text-sm text-slate-600">Email addresses are not summarised. Download the CSV to see them.</p>
       ) : (

@@ -2,7 +2,7 @@
 // The statistics are computed here, from the database, and handed to the model as
 // facts; the model only writes prose around them. Email answers are never sent.
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking';
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking' | 'calc' | 'file' | 'signature';
 export interface Field { id: string; label: string; type: FieldType; options: string[]; settings?: { min?: number; max?: number; rows?: string[] } }
 export interface Form { title: string; description?: string | null; university?: string | null; department?: string | null }
 export type Answers = Record<string, string | number | string[] | Record<string, string>>;
@@ -36,6 +36,7 @@ export function buildUserText(form: Form, fields: Field[], responses: Answers[])
   fields.forEach((f, i) => {
     const vals = responses.map((r) => r[f.id]).filter((v) => !blank(v));
     out.push(`Q${i + 1} (${f.type}): ${f.label}`);
+    if (f.type === 'calc') { out.push('  (a score calculated from other answers; not summarised here)', ''); return; }
     out.push(`  Answered by ${vals.length} of ${responses.length}.`);
     if (!vals.length) { out.push(''); return; }
     if (f.type === 'number' || f.type === 'scale') {
@@ -66,6 +67,8 @@ export function buildUserText(form: Form, fields: Field[], responses: Answers[])
       if (f.type === 'checkbox') out.push('  (several options could be ticked; percentages are of people who answered)');
     } else if (f.type === 'email') {
       out.push('  (email addresses withheld)');
+    } else if (f.type === 'file' || f.type === 'signature') {
+      out.push('  (uploaded files and signatures withheld)');
     } else {
       const shown = vals.slice(-MAX_TEXT_ANSWERS);
       if (shown.length < vals.length) out.push(`  Showing the latest ${shown.length} of ${vals.length} written answers:`);

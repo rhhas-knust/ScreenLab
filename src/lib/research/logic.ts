@@ -2,7 +2,7 @@
 // translations. Pure functions so the builder preview, the public form and the
 // tests all behave the same. The server (rh_submit_response) applies the same
 // rules again, so nothing here is trusted on its own.
-import { scaleRange, type AnswerValue, type PublicForm, type RhField, type ShowIf, type Translation } from '../api/research';
+import { isUpload, scaleRange, type AnswerValue, type PublicForm, type RhField, type ShowIf, type Translation } from '../api/research';
 
 export type FormField = PublicForm['fields'][number];
 /** A question ready to display: option/row text in the chosen language, values always in the original language. */
@@ -74,12 +74,16 @@ export function visibleFields<F extends FormField>(fields: F[], answers: Record<
   return out;
 }
 
-/** Answers to send: only visible questions, trimmed, numbers as numbers. */
+/**
+ * Answers to send: only visible questions, trimmed, numbers as numbers.
+ * Scores are never sent (they are worked out from the answers), and files are
+ * added by the page once uploaded.
+ */
 export function buildPayload(fields: FormField[], answers: Record<string, AnswerValue>): Record<string, AnswerValue> {
   const payload: Record<string, AnswerValue> = {};
   for (const f of visibleFields(fields, answers)) {
     const v = answers[f.id];
-    if (isEmpty(v)) continue;
+    if (isEmpty(v) || f.type === 'calc' || isUpload(f.type)) continue;
     payload[f.id] = f.type === 'number' ? Number(String(v).trim()) : typeof v === 'string' ? v.trim() : v;
   }
   return payload;
@@ -133,4 +137,12 @@ export function describeCondition(c: ShowIf, fields: Pick<RhField, 'id' | 'label
   const q = j < 0 ? 'a deleted question' : `Q${j + 1}`;
   if (c.op === 'answered') return `Shown only if ${q} is answered`;
   return `Shown only if ${q} ${c.op === 'not_equals' ? 'is not' : 'is'} “${c.value ?? ''}”`;
+}
+
+/** The thank-you-and-goodbye message when this answer falls in a quota group that is already full. */
+export function quotaMessage(f: FormField, v: AnswerValue | undefined, full: PublicForm['full_quotas']): string | null {
+  if (!full?.length || isEmpty(v)) return null;
+  const hit = full.find((q) => q.field === f.id && (Array.isArray(v) ? v.includes(q.value) : typeof v !== 'object' && String(v) === q.value));
+  if (!hit) return null;
+  return hit.message?.trim() || `Thank you for your interest. We already have all the responses we need from people who answered “${hit.value}”.`;
 }

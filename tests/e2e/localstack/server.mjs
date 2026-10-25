@@ -115,6 +115,31 @@ async function handleRhSummary(req, res, body) {
   return send(res, out.status, out.body);
 }
 
+/**
+ * Stand-in for the rh-invite Edge Function: same auth + RLS path, but emails are
+ * appended to /tmp/sl-outbox.jsonl instead of being sent. SL_EMAIL=off simulates
+ * a missing email key.
+ */
+async function handleRhInvite(req, res, body) {
+  const claims = claimsFrom(req);
+  if (claims.role !== 'authenticated') return send(res, 401, { error: 'Please sign in again.' });
+  if (process.env.SL_EMAIL === 'off') return send(res, 503, { error: 'Email sending is not set up yet: add RESEND_API_KEY and RH_EMAIL_FROM under Supabase → Edge Functions → Secrets.', code: 'not_configured' });
+  const { project_id, invite_ids = [], kind, subject, app_url } = JSON.parse(body.toString() || '{}');
+  const out = await asUser(claims, async (c) => {
+    const form = (await c.query('select id, title, status from rh_projects where id = $1', [project_id])).rows[0];
+    if (!form) return { status: 404, body: { error: 'Questionnaire not found' } };
+    if (form.status !== 'active') return { status: 400, body: { error: 'Publish the questionnaire (or reopen it) before sending invitations.', code: 'not_active' } };
+    const rows = (await c.query('select * from rh_invites where project_id = $1 and id = any($2::uuid[])', [form.id, invite_ids])).rows;
+    const targets = rows.filter((r) => kind !== 'reminder' || !r.responded_on);
+    for (const r of targets) {
+      fs.appendFileSync('/tmp/sl-outbox.jsonl', JSON.stringify({ to: r.email, kind, subject: subject || `${kind === 'reminder' ? 'Reminder' : 'Invitation'}: ${form.title}`, link: `${app_url}/f/${form.id}?i=${r.token}` }) + '\n');
+      await c.query('update rh_invites set last_sent_at = now(), send_count = send_count + 1 where id = $1', [r.id]);
+    }
+    return { status: 200, body: { sent: targets.length, skipped: invite_ids.length - targets.length, failed: [] } };
+  });
+  return send(res, out.status, out.body);
+}
+
 function claimsFrom(req) {
   const auth = req.headers.authorization ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
@@ -459,7 +484,8 @@ async function handleStorage(req, res, url, rawBody) {
       const t = verifyJwt(url.searchParams.get('token'));
       if (!t || t.url !== `${m[1]}/${m[2]}`) return send(res, 400, { error: 'invalid token' });
       const file = path.join(STORAGE_DIR, m[1], m[2]);
-      res.writeHead(200, { 'Content-Type': 'application/pdf', ...cors() });
+      const meta = (await pool.query('select metadata from storage.objects where bucket_id = $1 and name = $2', [m[1], m[2]])).rows[0]?.metadata;
+      res.writeHead(200, { 'Content-Type': meta?.mimetype || 'application/pdf', ...cors() });
       return fs.createReadStream(file).pipe(res);
     }
     if ((m = p.match(/^object\/([^/]+)\/(.+)$/)) && req.method === 'POST') {
@@ -515,6 +541,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/storage/v1')) return await handleStorage(req, res, url, body);
     if (url.pathname === '/functions/v1/ai-screen') return await handleAiScreen(req, res, body);
     if (url.pathname === '/functions/v1/rh-summary') return await handleRhSummary(req, res, body);
+    if (url.pathname === '/functions/v1/rh-invite') return await handleRhInvite(req, res, body);
     return send(res, 404, { message: 'not found' });
   } catch (e) {
     console.error(e);

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { scaleRange, type AnswerValue, type PublicForm, type SubmitMeta } from '../lib/api/research';
-import { buildPayload, localize, validate, visibleFields, type LocalField } from '../lib/research/logic';
+import { isUpload, scaleRange, type AnswerValue, type PublicForm, type SubmitMeta } from '../lib/api/research';
+import { buildPayload, localize, quotaMessage, validate, visibleFields, type LocalField } from '../lib/research/logic';
+import { optionOrder, pipe, randomOrder, withScores } from '../lib/research/formula';
+import { FileInput, SignaturePad, UPLOAD_ACCEPT, type PickedFile } from './UploadInputs';
 import { friendlyError } from '../lib/errors';
 import { fmtDate } from '../lib/hooks';
 import { Alert, Button, Input, Textarea, cx } from '../components/ui';
@@ -15,12 +17,16 @@ const CLOSED_TEXT: Record<string, string> = {
  * A questionnaire as respondents see it: header, language choice, information
  * sheet and consent, then the questions (with skip logic). Also the builder's preview.
  */
+/** What happened to a submission: sent now, or kept on this device until it is back online. */
+export type SubmitOutcome = 'sent' | 'queued';
+
 export function FormView({ form, preview = false, alreadyDone = false, onSubmit }: {
   form: PublicForm;
   preview?: boolean;
   /** This device has already responded to a one-response-per-device form. */
   alreadyDone?: boolean;
-  onSubmit?: (answers: Record<string, AnswerValue>, meta: SubmitMeta) => Promise<void>;
+  /** files: the picked uploads/signatures by question id, for the page to upload (or keep offline). */
+  onSubmit?: (answers: Record<string, AnswerValue>, meta: SubmitMeta, files: Record<string, PickedFile>) => Promise<SubmitOutcome | void>;
 }) {
   const langs = form.translations?.items ?? [];
   const [lang, setLang] = useState<string | null>(null);
@@ -29,10 +35,22 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<false | SubmitOutcome>(false);
+  const [files, setFiles] = useState<Record<string, PickedFile>>({});
+  // Randomised question and option order, fixed for this respondent while the page is open.
+  const [order] = useState(() => (form.randomize_questions ? randomOrder(form.fields) : form.fields).map((f) => f.id));
+  const [optOrder] = useState(() => Object.fromEntries(form.fields.filter((f) => f.settings?.shuffle_options)
+    .map((f) => [f.id, optionOrder(f.options, !!f.settings?.keep_last)])));
 
-  const local = useMemo(() => localize(form, lang), [form, lang]);
+  const local = useMemo(() => {
+    const l = localize(form, lang);
+    const byId = new Map(l.fields.map((f) => [f.id, f]));
+    const known = new Set(order);
+    return { ...l, fields: [...order.map((id) => byId.get(id)).filter((f): f is LocalField => !!f), ...l.fields.filter((f) => !known.has(f.id))] };
+  }, [form, lang, order]);
+  const scored = useMemo(() => withScores(form.fields, answers), [form.fields, answers]);
   const shown = visibleFields(local.fields, answers);
+  const asked = shown.filter((f) => f.type !== 'calc');
   const closed = form.closed_reason ?? (form.status === 'closed' ? 'closed' : null);
   const needsConsent = !!form.consent_text?.trim();
 
@@ -40,16 +58,30 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
     setAnswers((a) => ({ ...a, [id]: v }));
     if (errors[id]) setErrors((e) => ({ ...e, [id]: '' }));
   };
+  const setFile = (id: string, f: PickedFile | null) => {
+    setFiles((x) => { const n = { ...x }; if (f) n[id] = f; else delete n[id]; return n; });
+    setAnswers((a) => { const n = { ...a }; if (f) n[id] = f.name; else delete n[id]; return n; });
+    if (errors[id]) setErrors((e) => ({ ...e, [id]: '' }));
+  };
+  // Piped answers show as the respondent saw the option (in their language).
+  const pipeLabel = (id: string, v: AnswerValue) => {
+    const f = local.fields.find((x) => x.id === id);
+    const opt = (o: string) => (f ? f.optionLabels[f.options.indexOf(o)] ?? o : o);
+    if (Array.isArray(v)) return v.map(opt).join(', ');
+    if (typeof v === 'object') return '';
+    return opt(String(v));
+  };
+  const piped = (t: string | null | undefined) => (t ? pipe(t, scored, form.fields, pipeLabel) : t);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    for (const f of shown) {
-      const msg = validate(f, answers[f.id]);
+    for (const f of asked) {
+      const msg = validate(f, answers[f.id]) ?? quotaMessage(f, answers[f.id], form.full_quotas);
       if (msg) errs[f.id] = msg;
     }
     setErrors(errs);
-    const first = shown.find((f) => errs[f.id]);
+    const first = asked.find((f) => errs[f.id]);
     if (first) {
       document.getElementById(`field-${first.id}`)?.focus();
       return;
@@ -58,8 +90,9 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
     setSubmitting(true);
     setServerError(null);
     try {
-      await onSubmit(buildPayload(form.fields, answers), { consent: needsConsent ? consent === 'agreed' : undefined, language: lang });
-      setDone(true);
+      const upl = Object.fromEntries(asked.filter((f) => isUpload(f.type) && files[f.id]).map((f) => [f.id, files[f.id]]));
+      const outcome = await onSubmit(buildPayload(form.fields, answers), { consent: needsConsent ? consent === 'agreed' : undefined, language: lang }, upl);
+      setDone(outcome || 'sent');
       window.scrollTo(0, 0);
     } catch (err) {
       setServerError(friendlyError(err, 'Your response could not be submitted. Please try again.'));
@@ -84,7 +117,7 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
       {(form.university || form.department) && <p className="mt-1 text-sm text-slate-500">{[form.department, form.university].filter(Boolean).join(' · ')}</p>}
       {local.description && <p className="mt-3 whitespace-pre-wrap text-slate-700">{local.description}</p>}
       {form.closes_at && !closed && <p className="mt-3 text-xs text-slate-500">Open until {fmtDate(form.closes_at)}</p>}
-      {!closed && consent !== 'pending' && shown.some((x) => x.required) && <p className="mt-3 text-xs text-rose-700">* Required</p>}
+      {!closed && consent !== 'pending' && asked.some((x) => x.required) && <p className="mt-3 text-xs text-rose-700">* Required</p>}
     </header>
   );
 
@@ -97,9 +130,18 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
         <p className="text-3xl" aria-hidden="true">✓</p>
         <h2 className="mt-2 text-xl font-semibold text-ink-900">Thank you!</h2>
         <p className="mt-2 whitespace-pre-wrap text-slate-700">
-          {done ? local.thank_you_message || 'Your response has been recorded.' : 'A response has already been submitted from this device.'}
+          {done === 'queued'
+            ? 'Your answers are saved on this device. They will be sent automatically when there is an internet connection — keep this page or the app open, or open the link again later.'
+            : done ? local.thank_you_message || 'Your response has been recorded.' : 'A response has already been submitted from this device.'}
         </p>
-        {done && !form.one_per_device && <Button className="mt-5" onClick={() => { setAnswers({}); setDone(false); }}>Submit another response</Button>}
+        {done && shown.some((f) => f.type === 'calc' && f.settings?.show_result && typeof scored[f.id] === 'number') && (
+          <dl className="mx-auto mt-4 max-w-sm space-y-1 text-left text-sm" data-testid="rh-final-scores">
+            {shown.filter((f) => f.type === 'calc' && f.settings?.show_result && typeof scored[f.id] === 'number').map((f) => (
+              <div key={f.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-1.5"><dt>{piped(f.label)}</dt><dd className="font-semibold tabular-nums">{scored[f.id] as number}</dd></div>
+            ))}
+          </dl>
+        )}
+        {done && !form.one_per_device && <Button className="mt-5" onClick={() => { setAnswers({}); setFiles({}); setDone(false); }}>Submit another response</Button>}
       </div>
     );
   } else if (needsConsent && consent === 'declined') {
@@ -125,12 +167,22 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
   } else {
     body = (
       <form onSubmit={submit} noValidate className="space-y-4">
-        {shown.length === 0 && <p className="text-sm text-slate-500">This questionnaire has no questions yet.</p>}
-        {shown.map((f, i) => (
-          <Question key={f.id} f={f} n={i + 1} value={answers[f.id]} error={errors[f.id]} onChange={(v) => set(f.id, v)} />
+        {asked.length === 0 && <p className="text-sm text-slate-500">This questionnaire has no questions yet.</p>}
+        {form.randomize_questions && preview && <Alert kind="info">Questions appear in a random order for each respondent. Reload the preview to see another order.</Alert>}
+        {shown.map((f) => f.type === 'calc' ? (
+          f.settings?.show_result ? (
+            <div key={f.id} className="flex items-center justify-between gap-3 rounded-xl border border-ink-100 bg-ink-50 px-4 py-3" data-testid="rh-score">
+              <span className="font-medium text-ink-900">{piped(f.label)}</span>
+              <span className="text-lg font-semibold tabular-nums text-ink-900">{typeof scored[f.id] === 'number' ? scored[f.id] as number : '—'}</span>
+            </div>
+          ) : null
+        ) : (
+          <Question key={f.id} f={{ ...f, label: piped(f.label) ?? '', help: piped(f.help) ?? null }} n={asked.indexOf(f) + 1} value={answers[f.id]}
+            error={errors[f.id] || quotaMessage(f, answers[f.id], form.full_quotas) || undefined} onChange={(v) => set(f.id, v)}
+            optionOrder={optOrder[f.id]} file={files[f.id]} onFile={(x) => setFile(f.id, x)} preview={preview} />
         ))}
         {serverError && <Alert>{serverError}</Alert>}
-        {shown.length > 0 && (
+        {asked.length > 0 && (
           <Button type="submit" variant="primary" size="lg" loading={submitting} disabled={preview} className="w-full sm:w-auto">
             {preview ? 'Submit (disabled in preview)' : 'Submit'}
           </Button>
@@ -142,13 +194,20 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
   return <>{header}{body}</>;
 }
 
-function Question({ f, n, value: v, error: err, onChange: set }: {
+function Question({ f: field, n, value: v, error: err, onChange: set, optionOrder: ord, file, onFile, preview }: {
   f: LocalField;
   n: number;
   value: AnswerValue | undefined;
   error?: string;
   onChange: (v: AnswerValue) => void;
+  /** Shuffled option order for this respondent (values, not labels). */
+  optionOrder?: string[];
+  file?: PickedFile;
+  onFile: (f: PickedFile | null) => void;
+  preview?: boolean;
 }) {
+  // Options keep their values and translated labels; only the display order changes.
+  const f = ord ? { ...field, options: ord, optionLabels: ord.map((o) => field.optionLabels[field.options.indexOf(o)] ?? o) } : field;
   const labelId = `label-${f.id}`;
   const describedBy = [f.help ? `help-${f.id}` : '', err ? `err-${f.id}` : ''].filter(Boolean).join(' ') || undefined;
   const optionLabel = (o: string) => f.optionLabels[f.options.indexOf(o)] ?? o;
@@ -220,6 +279,8 @@ function Question({ f, n, value: v, error: err, onChange: set }: {
           </div>
         )}
         {f.type === 'ranking' && <RankingInput f={f} v={v as string[] | undefined} set={set} optionLabel={optionLabel} />}
+        {f.type === 'file' && <FileInput id={`field-${f.id}`} labelId={labelId} accept={UPLOAD_ACCEPT[f.settings?.accept ?? 'any']} kind={f.settings?.accept ?? 'any'} value={file} onChange={onFile} />}
+        {f.type === 'signature' && <SignaturePad id={`field-${f.id}`} labelId={labelId} value={file} onChange={onFile} disabled={preview} />}
       </div>
       {err && <p id={`err-${f.id}`} className="mt-2 text-sm text-rose-700" role="alert">{err}</p>}
     </fieldset>

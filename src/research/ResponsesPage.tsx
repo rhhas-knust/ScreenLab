@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { answerText, deleteResponse, type RhField, getRhProject, listFields, listResponses, responsesToCsv, rk } from '../lib/api/research';
+import { answerText, deleteResponse, fileUrl, isFileAnswer, type RhField, getRhProject, listFields, listResponses, responsesToCsv, rk } from '../lib/api/research';
+import { scoreResponses } from '../lib/research/formula';
+import { quotaCount } from './QuotasEditor';
 import { downloadText, safeFileName } from '../lib/export/formats';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
@@ -28,15 +30,18 @@ export function ResponsesPage() {
   const view = params.get('view');
   const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' ? view : 'summary';
   const [filters, setFilters] = useState<Filter[]>([]);
-  const filtered = useMemo(() => (fq.data && rq.data ? applyFilters(fq.data, rq.data, filters) : []), [fq.data, rq.data, filters]);
+  // Calculated scores are worked out from the answers here, so every view, chart and download has them.
+  const scored = useMemo(() => (fq.data && rq.data ? scoreResponses(fq.data, rq.data) : null), [fq.data, rq.data]);
+  const filtered = useMemo(() => (fq.data && scored ? applyFilters(fq.data, scored, filters) : []), [fq.data, scored, filters]);
   const stats = useMemo(() => (fq.data ? fq.data.map((f) => fieldStats(f, filtered)) : []), [fq.data, filtered]);
-  const ov = useMemo(() => (fq.data && rq.data ? overview(fq.data, filtered) : null), [fq.data, rq.data, filtered]);
+  const ov = useMemo(() => (fq.data && scored ? overview(fq.data, filtered) : null), [fq.data, scored, filtered]);
 
   if (pq.error) return <div className="p-6"><Alert>{friendlyError(pq.error, 'Questionnaire not found.')}</Alert></div>;
-  if (!pq.data || !fq.data || !rq.data) return <PageLoader />;
+  if (!pq.data || !fq.data || !scored) return <PageLoader />;
   const project = pq.data;
   const fields = fq.data;
-  const responses = rq.data;
+  const responses = scored;
+  const quotas = (project.form_options?.quotas ?? []).filter((q) => q.value && q.limit);
 
   const isFiltered = filtered.length !== responses.length || filters.length > 0;
   const exportCsv = () => downloadText(`${safeFileName(project.title)}_responses${isFiltered ? '_filtered' : ''}.csv`, responsesToCsv(fields, filtered, project.translations ?? {}), 'text/csv');
@@ -108,6 +113,24 @@ export function ResponsesPage() {
                   <PerDayChart days={ov.perDay} />
                 </Card>
               )}
+              {quotas.length > 0 && (
+                <div data-testid="rh-quota-status"><Card className="p-4">
+                  <h2 className="mb-2 text-sm font-semibold text-ink-900">Quotas</h2>
+                  <ul className="space-y-1 text-sm">
+                    {quotas.map((q, i) => {
+                      const f = fields.find((x) => x.id === q.field);
+                      const n = quotaCount(q, rq.data ?? []);
+                      return (
+                        <li key={i} className="flex flex-wrap items-center gap-2">
+                          <span className="min-w-0 flex-1">Q{f ? fields.indexOf(f) + 1 : '?'} = “{q.value}”</span>
+                          <span className="tabular-nums">{n} / {q.limit}</span>
+                          {n >= q.limit && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">full</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </Card></div>
+              )}
               {!isFiltered && <AiSummaryCard formId={formId} responseCount={responses.length} />}
               <div className="space-y-3">
                 {stats.map((st, i) => <QuestionStats key={st.fieldId} s={st} index={i} onChart={(x) => setParams({ view: 'studio', x }, { replace: true })} />)}
@@ -129,7 +152,7 @@ export function ResponsesPage() {
                   <tr key={r.id} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-2 text-slate-500 tabular-nums">{num.get(r.id)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-600">{fmtDate(r.submitted_at)}</td>
-                    {fields.map((f) => <td key={f.id} className="max-w-[16rem] px-3 py-2 break-words">{answerText(r.answers[f.id]) || <span className="text-slate-300">—</span>}</td>)}
+                    {fields.map((f) => <td key={f.id} className="max-w-[16rem] px-3 py-2 break-words">{isFileAnswer(r.answers[f.id]) ? <FileLink path={r.answers[f.id] as unknown as { file: string }} name={answerText(r.answers[f.id])} /> : answerText(r.answers[f.id]) || <span className="text-slate-300">—</span>}</td>)}
                     <td className="px-3 py-2"><Button size="sm" variant="ghost" className="text-rose-700" onClick={() => remove(r.id, num.get(r.id)!)} aria-label={`Delete response ${num.get(r.id)}`}>Delete</Button></td>
                   </tr>
                 ))}
@@ -173,4 +196,15 @@ function FilterBar({ fields, filters, onChange, matched, total }: { fields: RhFi
       {filters.length > 0 && <span className="text-slate-600" data-testid="rh-filter-count">{matched} of {total} responses</span>}
     </div>
   );
+}
+
+/** Opens an uploaded file or signature through a short-lived private link. */
+function FileLink({ path, name }: { path: { file: string }; name: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    setBusy(true);
+    try { window.open(await fileUrl(path.file), '_blank', 'noopener'); } catch (e) { toast(friendlyError(e, 'Could not open the file.'), { kind: 'error' }); } finally { setBusy(false); }
+  };
+  return <button type="button" className="text-left text-ink-700 underline disabled:opacity-50" onClick={open} disabled={busy} data-testid="rh-file-link">📎 {name}</button>;
 }

@@ -3,7 +3,7 @@
 // make in MATLAB, R or SPSS. Pure functions; the page only renders the model.
 import { chiSquare, isBlank, round, type CrossTab } from './analytics';
 import { anova1, describe, pearson, tCrit95, welchT, type Anova, type Correlation, type Describe, type TTest } from './stats';
-import { scaleRange, type RhField, type RhResponse } from '../api/research';
+import { isFileAnswer, isUpload, scaleRange, type RhField, type RhResponse } from '../api/research';
 
 export type VarKind = 'numeric' | 'categorical' | 'multi' | 'date' | 'text';
 export type Value = number | string | string[] | null;
@@ -36,7 +36,7 @@ export function buildDataset(fields: RhField[], responses: RhResponse[]): Datase
   fields.forEach((f, i) => {
     const q = `Q${i + 1}`;
     const raw = responses.map((r) => r.answers[f.id]);
-    if (f.type === 'number' || f.type === 'scale') {
+    if (f.type === 'number' || f.type === 'scale' || f.type === 'calc') {
       vars.push({
         name: q, label: f.label, kind: 'numeric', scale: f.type === 'scale',
         categories: f.type === 'scale' ? scaleRange(f.settings).points.map(String) : [],
@@ -58,6 +58,8 @@ export function buildDataset(fields: RhField[], responses: RhResponse[]): Datase
       }));
     } else if (f.type === 'date') {
       vars.push({ name: q, label: f.label, kind: 'date', categories: [], values: raw.map((v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)) });
+    } else if (isUpload(f.type)) {
+      vars.push({ name: q, label: f.label, kind: 'text', categories: [], values: raw.map((v) => (isFileAnswer(v) ? v.name : null)) });
     } else {
       vars.push({ name: q, label: f.label, kind: 'text', categories: [], email: f.type === 'email', values: raw.map((v) => (isBlank(v) ? null : String(v).trim())) });
     }

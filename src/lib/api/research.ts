@@ -3,9 +3,9 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
 import { must } from '../errors';
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking';
+export type FieldType = 'text' | 'textarea' | 'number' | 'email' | 'radio' | 'checkbox' | 'scale' | 'date' | 'grid' | 'ranking' | 'calc' | 'file' | 'signature';
 export type FormStatus = 'draft' | 'active' | 'closed';
-/** string (text, radio, date), number (number, scale), string[] (checkbox, ranking), { row: column } (grid). */
+/** string (text, radio, date), number (number, scale, calc), string[] (checkbox, ranking), { row: column } (grid), FileAnswer (file, signature). */
 export type AnswerValue = string | number | string[] | Record<string, string>;
 
 export const FIELD_TYPES: { type: FieldType; label: string; hint: string }[] = [
@@ -19,11 +19,17 @@ export const FIELD_TYPES: { type: FieldType; label: string; hint: string }[] = [
   { type: 'ranking', label: 'Ranking', hint: 'Put the options in order' },
   { type: 'date', label: 'Date', hint: 'A calendar date' },
   { type: 'email', label: 'Email', hint: 'Validated email address' },
+  { type: 'file', label: 'File upload', hint: 'Photo, PDF or document (up to 10 MB)' },
+  { type: 'signature', label: 'Signature', hint: 'Drawn with a finger or mouse' },
+  { type: 'calc', label: 'Calculated score', hint: 'Worked out from other answers, e.g. Q2 + Q3' },
 ];
 export const FIELD_LABEL = Object.fromEntries(FIELD_TYPES.map((t) => [t.type, t.label])) as Record<FieldType, string>;
 export const hasOptions = (t: FieldType) => t === 'radio' || t === 'checkbox' || t === 'ranking' || t === 'grid';
 /** Questions another question can depend on in "show only if". */
-export const canBeCondition = (t: FieldType) => t !== 'grid' && t !== 'ranking';
+export const canBeCondition = (t: FieldType) => t !== 'grid' && t !== 'ranking' && t !== 'calc' && t !== 'file' && t !== 'signature';
+/** Questions whose options can be shown in a random order. */
+export const canShuffle = (t: FieldType) => t === 'radio' || t === 'checkbox' || t === 'ranking';
+export const isUpload = (t: FieldType) => t === 'file' || t === 'signature';
 
 export type ConditionOp = 'equals' | 'not_equals' | 'answered';
 export interface ShowIf { field: string; op: ConditionOp; value?: string }
@@ -36,7 +42,25 @@ export interface FieldSettings {
   /** grid: the statements (rows); the options are the answer columns */
   rows?: string[];
   show_if?: ShowIf | null;
+  /** radio/checkbox/ranking: show the options in a random order (keep_last pins e.g. “Other” at the end). */
+  shuffle_options?: boolean;
+  keep_last?: boolean;
+  /** calc: formula with question references stored as @<field id>, e.g. "@id1 + @id2_3". */
+  formula?: string;
+  decimals?: number;
+  /** calc: show the result to the respondent (otherwise only the researcher sees it). */
+  show_result?: boolean;
+  /** file: which kinds of file to accept. */
+  accept?: 'image' | 'document' | 'any';
 }
+
+/** An uploaded file or signature: a path in the private rh-uploads bucket. */
+export interface FileAnswer { file: string; name: string; type: string; size: string }
+export const isFileAnswer = (v: unknown): v is FileAnswer =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as FileAnswer).file === 'string' && typeof (v as FileAnswer).name === 'string';
+
+export interface Quota { field: string; value: string; limit: number; message?: string }
+export interface FormOptions { randomize_questions?: boolean; quotas?: Quota[] }
 export const scaleRange = (s: FieldSettings | undefined) => {
   const min = s?.min === 0 ? 0 : 1;
   const max = Math.min(10, Math.max(min + 1, s?.max ?? 5));
@@ -81,6 +105,7 @@ export interface RhProject {
   /** Read-only results link token (null = not shared). */
   results_token?: string | null;
   results_include_text?: boolean;
+  form_options?: FormOptions;
   created_at: string;
   updated_at: string;
 }
@@ -134,6 +159,10 @@ export interface PublicForm {
   translations?: Translations;
   /** Why the form is not taking responses (null = open). Missing on servers before v2. */
   closed_reason?: ClosedReason;
+  randomize_questions?: boolean;
+  /** Quota groups that are already full (v3). */
+  full_quotas?: { field: string; value: string; message?: string | null }[];
+  has_uploads?: boolean;
   fields: Omit<RhField, 'project_id' | 'field_order'>[];
 }
 
@@ -185,6 +214,13 @@ export function cleanSettings(f: Pick<RhField, 'type' | 'settings'>): FieldSetti
     if (s.max_label?.trim()) out.max_label = s.max_label.trim();
   }
   if (f.type === 'grid') out.rows = (s.rows ?? []).map((r) => r.trim()).filter(Boolean).filter((r, i, a) => a.indexOf(r) === i).slice(0, 50);
+  if (canShuffle(f.type) && s.shuffle_options) { out.shuffle_options = true; if (s.keep_last) out.keep_last = true; }
+  if (f.type === 'calc') {
+    out.formula = (s.formula ?? '').slice(0, 2000);
+    out.decimals = Math.max(0, Math.min(6, Math.round(s.decimals ?? 2)));
+    if (s.show_result) out.show_result = true;
+  }
+  if (f.type === 'file') out.accept = s.accept ?? 'any';
   if (s.show_if?.field) out.show_if = { field: s.show_if.field, op: s.show_if.op, ...(s.show_if.op === 'answered' ? {} : { value: s.show_if.value ?? '' }) };
   return out;
 }
@@ -221,7 +257,7 @@ export async function getPublicForm(id: string): Promise<PublicForm | null> {
   return must(await supabase.rpc('rh_public_form', { p_project_id: id })) as PublicForm | null;
 }
 
-export interface SubmitMeta { consent?: boolean; language?: string | null; device?: string | null }
+export interface SubmitMeta { consent?: boolean; language?: string | null; device?: string | null; invite?: string | null; client_id?: string | null; collected_at?: string | null }
 
 export async function submitResponse(id: string, answers: Record<string, AnswerValue>, meta: SubmitMeta = {}): Promise<string> {
   const res = await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers, p_meta: meta });
@@ -279,8 +315,9 @@ export async function setResultsSharing(id: string, on: boolean, includeText = f
   return updateRhProject(id, { results_token: on ? crypto.randomUUID() : null, results_include_text: on && includeText });
 }
 
-export function answerText(v: AnswerValue | undefined): string {
+export function answerText(v: AnswerValue | FileAnswer | undefined): string {
   if (v == null) return '';
+  if (isFileAnswer(v)) return v.name;
   if (Array.isArray(v)) return v.join('; ');
   if (typeof v === 'object') return Object.entries(v).map(([k, x]) => `${k}: ${x}`).join('; ');
   return String(v);
@@ -355,4 +392,110 @@ export async function writeSummary(projectId: string): Promise<RhSummary> {
     throw new RhSummaryError('Could not reach the AI service. Check your connection.', 'network');
   }
   return data as RhSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Uploads (file and signature questions)
+// ---------------------------------------------------------------------------
+export const UPLOAD_BUCKET = 'rh-uploads';
+
+/**
+ * Upload one picked file into the form's folder. `slot` is a uuid fixed per
+ * file when the response is made, so a retry after a dropped connection
+ * reuses the same path instead of leaving a copy behind.
+ */
+export async function uploadFormFile(projectId: string, slot: string, file: { blob: Blob; name: string; type: string; size: number }): Promise<FileAnswer> {
+  const safe = file.name.replace(/[^\w.\- ]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120) || 'file';
+  const path = `${projectId}/${slot}/${safe}`;
+  const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(path, file.blob, { contentType: file.type, upsert: false });
+  if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  return { file: path, name: file.name.slice(0, 200), type: file.type, size: String(file.size) };
+}
+
+/** A short-lived link for the owner to open an uploaded file. */
+export async function fileUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(UPLOAD_BUCKET).createSignedUrl(path, 60 * 10);
+  if (error || !data) throw error ?? new Error('Could not open the file');
+  return data.signedUrl;
+}
+
+// ---------------------------------------------------------------------------
+// Invitations and reminders
+// ---------------------------------------------------------------------------
+export interface RhInvite {
+  id: string;
+  project_id: string;
+  email: string;
+  name: string | null;
+  token: string;
+  created_at: string;
+  last_sent_at: string | null;
+  send_count: number;
+  /** The day this person responded (which response is theirs is never recorded). */
+  responded_on: string | null;
+}
+
+export const inviteKey = (id: string) => ['rh', 'invites', id] as const;
+
+export function inviteUrl(projectId: string, token: string): string {
+  return `${publicFormUrl(projectId)}?i=${token}`;
+}
+
+export async function listInvites(projectId: string): Promise<RhInvite[]> {
+  return must(await supabase.from('rh_invites').select('*').eq('project_id', projectId).order('created_at').order('email')) as RhInvite[];
+}
+
+/** Add people; an email already on the list is left as it is. */
+export async function addInvites(projectId: string, people: { email: string; name?: string | null }[]): Promise<number> {
+  if (!people.length) return 0;
+  const rows = must(await supabase.from('rh_invites')
+    .upsert(people.map((p) => ({ project_id: projectId, email: p.email, name: p.name || null })), { onConflict: 'project_id,email', ignoreDuplicates: true })
+    .select('id')) as { id: string }[] | null;
+  return rows?.length ?? 0;
+}
+
+export async function deleteInvite(id: string): Promise<void> {
+  must(await supabase.from('rh_invites').delete().eq('id', id));
+}
+
+export interface SendResult { sent: number; skipped: number; failed: { email: string; error: string }[] }
+export class InviteError extends Error {
+  constructor(message: string, public code?: string) { super(message); }
+}
+
+/** Email invitations or reminders through the rh-invite Edge Function (the email key stays on the server). */
+export async function sendInvites(projectId: string, ids: string[], kind: 'invite' | 'reminder', subject: string, message: string): Promise<SendResult> {
+  const { data, error } = await supabase.functions.invoke('rh-invite', {
+    body: { project_id: projectId, invite_ids: ids, kind, subject, message, app_url: window.location.origin },
+  });
+  if (error) {
+    if (error instanceof FunctionsHttpError) {
+      const body = await (error.context as Response).json().catch(() => null) as { error?: string; code?: string } | null;
+      throw new InviteError(body?.error ?? 'Sending failed.', body?.code);
+    }
+    throw new InviteError('Could not reach the email service. Check your connection.', 'network');
+  }
+  return data as SendResult;
+}
+
+/** "Ama Mensah <ama@x.com>", "ama@x.com, Ama Mensah", "Ama Mensah, ama@x.com" or a bare address — one per line or comma/semicolon separated. */
+export function parseInvitees(text: string): { people: { email: string; name: string | null }[]; bad: string[] } {
+  const EMAIL = /[^\s<>,;"']+@[^\s<>,;"']+\.[^\s<>,;"']+/;
+  const people = new Map<string, { email: string; name: string | null }>();
+  const bad: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    // A line with several addresses and no names: split it.
+    const all = line.match(new RegExp(EMAIL.source, 'g')) ?? [];
+    const parts = all.length > 1 ? line.split(/[,;]+/) : [line];
+    for (const part of parts) {
+      const m = part.match(EMAIL);
+      if (!m) { if (part.trim() && !/^(email|e-mail|name)\b/i.test(part.trim())) bad.push(part.trim()); continue; }
+      const email = m[0].toLowerCase();
+      const name = part.replace(m[0], '').replace(/[<>"',;\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || null;
+      if (!people.has(email)) people.set(email, { email, name });
+    }
+  }
+  return { people: [...people.values()], bad };
 }
