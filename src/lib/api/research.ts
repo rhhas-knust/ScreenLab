@@ -188,7 +188,14 @@ export async function getRhProject(id: string): Promise<RhProject> {
 }
 
 export async function updateRhProject(id: string, patch: Partial<RhProject>): Promise<RhProject> {
-  return must(await supabase.from('rh_projects').update(patch).eq('id', id).select('*').single()) as RhProject;
+  const res = await supabase.from('rh_projects').update(patch).eq('id', id).select('*').single();
+  // A database not yet upgraded to ResearchHub v3 has no form_options column: save everything else.
+  if ((res.error as { code?: string } | null)?.code === 'PGRST204' && 'form_options' in patch) {
+    const { form_options: _skip, ...rest } = patch;
+    void _skip;
+    return must(await supabase.from('rh_projects').update(rest).eq('id', id).select('*').single()) as RhProject;
+  }
+  return must(res) as RhProject;
 }
 
 export async function deleteRhProject(id: string): Promise<void> {
