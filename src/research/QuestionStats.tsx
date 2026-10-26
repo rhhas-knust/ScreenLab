@@ -25,6 +25,7 @@ export function QuestionStats({ s, index, onChart }: { s: FieldStats; index: num
         <h3 className="mt-0.5 pr-20 font-semibold text-ink-900">{s.label}</h3>
         <p className="text-xs text-slate-500">
           {s.answered} of {total} answered{s.missing ? ` · ${s.missing} skipped or not shown` : ''}
+          {s.weighted && <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-900" data-testid="rh-weighted-badge">Weighted %{s.kind === 'numeric' ? ' and mean' : ''}</span>}
         </p>
       </header>
 

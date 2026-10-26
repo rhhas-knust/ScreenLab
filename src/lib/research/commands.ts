@@ -4,6 +4,7 @@
 //   mean(Q2)  corr(Q2, Q5)  ttest2(Q2, Q1)  anova1(Q2, Q1)  crosstab(Q1, Q3)
 import { findVar, isCat, isNum, numsOf, answeredCats, catsOf, fmtP, type ChartSpec, type Dataset, type StudioVar } from './studio';
 import { anova1, describe, pearson, welchT } from './stats';
+import { describeFit, fitModel, fitTable } from './regression';
 import { chiSquare, round } from './analytics';
 
 type Arg = { kind: 'name'; v: string } | { kind: 'num'; v: number } | { kind: 'str'; v: string };
@@ -63,6 +64,8 @@ export const HELP = `Plots (redraw the figure)
 Results (printed here)
   mean(Q2)  median(Q2)  std(Q2)  var(Q2)  min(Q2)  max(Q2)  numel(Q2)
   summary(Q2)  tabulate(Q1)  corr(Q2, Q5)  fitlm(Q2, Q5)
+  fitlm(Q1, Q2, Q5)   (regression: predictors, then the outcome)
+  fitglm(Q2, Q3, Q4, 'Yes')   (logistic: chance that Q4 is “Yes”)
   ttest2(Q2, Q1)   anova1(Q2, Q1)   crosstab(Q1, Q3)
 Other
   who / whos   (list variables)   clc   (clear this window)   help`;
@@ -155,7 +158,21 @@ export function runCommand(src: string, ds: Dataset, current: ChartSpec): Comman
       const lines = a.categories.map((c) => { const k = ans.filter((x) => x.includes(c)).length; return `  ${c.slice(0, 30).padEnd(w)}  ${String(k).padStart(5)}  ${(ans.length ? (k / ans.length) * 100 : 0).toFixed(1).padStart(6)}%`; });
       return { output: `  ${'Value'.padEnd(w)}  ${'Count'.padStart(5)}  Percent\n${lines.join('\n')}\n  ${ans.length} answered, ${ds.n - ans.length} blank` };
     }
-    case 'corr': case 'corrcoef': case 'fitlm': case 'polyfit': {
+    case 'fitglm': case 'logit': case 'fitlm': case 'regress': {
+      // MATLAB order: predictors first, outcome last — fitlm(Q2, Q3, Q5) explains Q5 by Q2 and Q3.
+      if (fn === 'fitlm' && vars.length === 2 && isNum(vars[0]) && isNum(vars[1])) return runCommand(`corr_fit(${vars[0].name}, ${vars[1].name})`, ds, current);
+      if (vars.length < 2) return err(`${fn} needs predictors and then the outcome, e.g. ${fn}(Q2, Q3, Q5).`);
+      const y = vars[vars.length - 1];
+      const logistic = fn === 'fitglm' || fn === 'logit';
+      const event = p.args.find((x) => x.kind === 'str')?.v as string | undefined;
+      const fit = fitModel(ds, { outcome: y.name, predictors: vars.slice(0, -1).map((v) => v.name), kind: logistic ? 'logistic' : 'linear', event, weighted: !!ds.weights });
+      if (typeof fit === 'string') return err(fit);
+      const rows = fitTable(fit);
+      const w = rows[0].map((_, j) => Math.max(...rows.map((r) => String(r[j]).length)));
+      const table = rows.map((r) => '  ' + r.map((c, j) => (j === 0 ? String(c).padEnd(w[j]) : String(c).padStart(w[j]))).join('  ')).join('\n');
+      return { output: `${describeFit(fit, ds).join('\n')}\n${table}` };
+    }
+    case 'corr_fit': case 'corr': case 'corrcoef': case 'polyfit': {
       const e = needNum(a, fn) ?? needNum(b, fn); if (e) return err(e.replace('This', fn));
       const xs: number[] = [], ys: number[] = [];
       numsOf(a).forEach((x, i) => { const y = numsOf(b)[i]; if (x != null && y != null) { xs.push(x); ys.push(y); } });

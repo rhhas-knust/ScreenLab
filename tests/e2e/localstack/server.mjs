@@ -104,7 +104,7 @@ async function handleRhSummary(req, res, body) {
   const out = await asUser(claims, async (c) => {
     const form = (await c.query('select id, title from rh_projects where id = $1', [project_id])).rows[0];
     if (!form) return { status: 404, body: { error: 'Questionnaire not found' } };
-    const n = Number((await c.query('select count(*) from rh_responses where project_id = $1', [form.id])).rows[0].count);
+    const n = Number((await c.query('select count(*) from rh_responses where project_id = $1 and not excluded', [form.id])).rows[0].count);
     if (n < 3) return { status: 400, body: { error: 'Collect at least 3 responses before asking for a summary.', code: 'too_few' } };
     const summary = { headline: `Test summary of ${n} responses to ${form.title}.`, key_findings: [`${n} people responded.`], open_text_themes: [], limitations: ['Small test sample.'] };
     const row = (await c.query(

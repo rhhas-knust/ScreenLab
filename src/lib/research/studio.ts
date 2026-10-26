@@ -4,6 +4,7 @@
 import { chiSquare, isBlank, round, type CrossTab } from './analytics';
 import { anova1, describe, pearson, tCrit95, welchT, type Anova, type Correlation, type Describe, type TTest } from './stats';
 import { isFileAnswer, isUpload, scaleRange, type RhField, type RhResponse } from '../api/research';
+import { refsToDisplay } from './formula';
 
 export type VarKind = 'numeric' | 'categorical' | 'multi' | 'date' | 'text';
 export type Value = number | string | string[] | null;
@@ -22,7 +23,13 @@ export interface StudioVar {
   values: Value[];
 }
 
-export interface Dataset { vars: StudioVar[]; n: number; ids: string[] }
+export interface Dataset {
+  vars: StudioVar[];
+  n: number;
+  ids: string[];
+  /** Survey weights aligned with the responses (mean 1), when weighting is on. */
+  weights?: number[] | null;
+}
 
 const num = (v: unknown): number | null => {
   if (v == null || v === '') return null;
@@ -31,8 +38,10 @@ const num = (v: unknown): number | null => {
 };
 
 /** One variable per question; grids get one per statement, rankings one per option (its rank). */
-export function buildDataset(fields: RhField[], responses: RhResponse[]): Dataset {
+export function buildDataset(fields: RhField[], responses: RhResponse[], weights?: Map<string, number> | null): Dataset {
   const vars: StudioVar[] = [];
+  // Labels with piped answers show as {Q2}, not the stored reference.
+  fields = fields.map((f) => (f.label.includes('{@') ? { ...f, label: refsToDisplay(f.label, fields) } : f));
   fields.forEach((f, i) => {
     const q = `Q${i + 1}`;
     const raw = responses.map((r) => r.answers[f.id]);
@@ -65,7 +74,7 @@ export function buildDataset(fields: RhField[], responses: RhResponse[]): Datase
     }
   });
   vars.push({ name: 'Submitted', label: 'Date submitted', kind: 'date', categories: [], values: responses.map((r) => r.submitted_at.slice(0, 10)) });
-  return { vars, n: responses.length, ids: responses.map((r) => r.id) };
+  return { vars, n: responses.length, ids: responses.map((r) => r.id), weights: weights ? responses.map((r) => weights.get(r.id) ?? 1) : null };
 }
 
 /** Variables that can go on a category axis (choices, checkboxes, scales). */
@@ -203,53 +212,66 @@ export function buildChart(spec: ChartSpec, ds: Dataset): ChartResult {
     case 'pie': {
       if (!isCat(x)) return empty(`${x.name} is not a choice or scale question. Bar and pie charts need categories.`);
       const cats = x.categories;
-      const answered = answeredCats(ds, x);
+      // With survey weights, counts are weighted sums (people still shown as n); tests stay on plain counts.
+      const W = !!ds.weights;
+      const wt = (i: number) => ds.weights?.[i] ?? 1;
+      const show = (v: number) => (W ? round(v, 1) : v);
+      const wNote = W ? ['Weighted counts and percentages (survey weights are on).'] : [];
+      const counts = cats.map(() => 0);
+      let n = 0, wn = 0;
+      for (let i = 0; i < ds.n; i++) {
+        const a = catsOf(x, i);
+        if (!a.length) continue;
+        n++; wn += wt(i);
+        for (const c of a) { const k = cats.indexOf(c); if (k >= 0) counts[k] += wt(i); }
+      }
+      const pctOf = (c: number) => (wn ? round((c / wn) * 100, 1) : 0);
       if (spec.type === 'pie') {
         if (x.kind === 'multi') return empty('A checkbox question lets people tick several answers, so its slices would not add up to 100%. Use a bar chart.');
-        const counts = cats.map((c) => answered.filter((a) => a.includes(c)).length);
-        const n = answered.length;
-        const slices = cats.map((c, i) => ({ label: c, count: counts[i], pct: n ? round((counts[i] / n) * 100, 1) : 0 }));
-        return res({ kind: 'pie', slices, n }, '', '', [`${n} respondent${n === 1 ? '' : 's'} answered ${x.name}.`],
-          [['Answer', 'Count', 'Percent'], ...slices.map((s) => [s.label, s.count, s.pct])]);
+        const slices = cats.map((c, i) => ({ label: c, count: show(counts[i]), pct: pctOf(counts[i]) }));
+        return res({ kind: 'pie', slices, n }, '', '', [`${n} respondent${n === 1 ? '' : 's'} answered ${x.name}.`, ...wNote],
+          [['Answer', W ? 'Weighted count' : 'Count', 'Percent'], ...slices.map((s) => [s.label, s.count, s.pct])]);
       }
-      const n = answered.length;
       let order = cats.map((_, i) => i);
       if (!g || g.name === x.name) {
-        const counts = cats.map((c) => answered.filter((a) => a.includes(c)).length);
         if (spec.sort) order = order.sort((a, b) => counts[b] - counts[a]);
-        const values = order.map((i) => (spec.percent ? (n ? round((counts[i] / n) * 100, 1) : 0) : counts[i]));
-        const stats = [`${n} respondent${n === 1 ? '' : 's'} answered ${x.name}.${x.kind === 'multi' ? ' People could tick more than one option, so percentages can add up to more than 100%.' : ''}`];
-        if (x.scale) { const d = describe(numsOf(x).filter((v): v is number => v != null)); stats.push(`Mean ${r2(d.mean)}, SD ${r2(d.sd)}, median ${r2(d.median)}.`); }
+        const values = order.map((i) => (spec.percent ? pctOf(counts[i]) : show(counts[i])));
+        const stats = [`${n} respondent${n === 1 ? '' : 's'} answered ${x.name}.${x.kind === 'multi' ? ' People could tick more than one option, so percentages can add up to more than 100%.' : ''}`, ...wNote];
+        if (x.scale) { const d = describe(numsOf(x).filter((v): v is number => v != null)); stats.push(`Mean ${r2(d.mean)}, SD ${r2(d.sd)}, median ${r2(d.median)}${W ? ' (unweighted)' : ''}.`); }
         return res(
           { kind: 'bars', horizontal: spec.type === 'barh', categories: order.map((i) => cats[i]), series: [{ name: 'Respondents', values }], stacked: false, percent: !!spec.percent, n, multi: x.kind === 'multi' },
-          label(x), spec.percent ? '% of respondents' : 'Respondents', stats,
-          [['Answer', 'Count', 'Percent'], ...order.map((i) => [cats[i], counts[i], n ? round((counts[i] / n) * 100, 1) : 0])],
+          label(x), spec.percent ? '% of respondents' : W ? 'Respondents (weighted)' : 'Respondents', stats,
+          [['Answer', W ? 'Weighted count' : 'Count', 'Percent'], ...order.map((i) => [cats[i], show(counts[i]), pctOf(counts[i])])],
         );
       }
       if (!isCat(g)) return empty(`${g.name} is not a choice or scale question, so it cannot split the bars.`);
       const gi = groupIndex(g, MAX_SERIES);
-      const counts = cats.map(() => gi.names.map(() => 0));
+      const plain = cats.map(() => gi.names.map(() => 0));
+      const cell = cats.map(() => gi.names.map(() => 0));
       const totals = gi.names.map(() => 0);
+      let people = 0;
       for (let i = 0; i < ds.n; i++) {
         const a = catsOf(x, i), b = gi.of(i);
         if (!a.length || !b.length) continue;
-        for (const k of b) totals[k]++;
-        for (const c of a) { const r = cats.indexOf(c); if (r >= 0) for (const k of b) counts[r][k]++; }
+        people++;
+        for (const k of b) totals[k] += wt(i);
+        for (const c of a) { const r = cats.indexOf(c); if (r >= 0) for (const k of b) { plain[r][k]++; cell[r][k] += wt(i); } }
       }
       const series = gi.names.map((name, k) => ({
-        name, values: cats.map((_, r) => (spec.percent ? (totals[k] ? round((counts[r][k] / totals[k]) * 100, 1) : 0) : counts[r][k])),
+        name, values: cats.map((_, r) => (spec.percent ? (totals[k] ? round((cell[r][k] / totals[k]) * 100, 1) : 0) : show(cell[r][k]))),
       }));
-      const stats: string[] = [];
+      const shownCells = W ? cell.map((r) => r.map(show)) : plain;
+      const stats: string[] = [...(W ? ['Weighted counts and percentages; the chi-square test below uses the unweighted counts.'] : [])];
       const overlap = x.kind === 'multi' || g.kind === 'multi';
-      const t = overlap ? null : chiSquare(counts);
+      const t = overlap ? null : chiSquare(plain);
       stats.push(t
         ? `Chi-square test of independence: χ² = ${t.chi2}, df = ${t.df}, ${fmtP(t.p)} — ${t.p < 0.05 ? `${x.name} and ${g.name} are associated at the 5% level` : `no evidence that ${x.name} and ${g.name} are associated at the 5% level`}.${t.lowExpected > 20 ? ` ${t.lowExpected}% of cells have an expected count below 5, so treat this with caution.` : ''}`
         : overlap ? 'No chi-square test: a checkbox question lets people pick several answers, so the groups overlap.' : 'Not enough data for a chi-square test yet.');
       if (spec.percent) stats.push(`Percentages are of each ${g.name} group.`);
       return res(
-        { kind: 'bars', horizontal: spec.type === 'barh', categories: cats, series, stacked: !!spec.stacked, percent: !!spec.percent, n: totals.reduce((s, v) => s + v, 0), multi: x.kind === 'multi' },
+        { kind: 'bars', horizontal: spec.type === 'barh', categories: cats, series, stacked: !!spec.stacked, percent: !!spec.percent, n: people, multi: x.kind === 'multi' },
         label(x), spec.percent ? `% of each ${g.name} group` : 'Respondents', stats,
-        [[`${x.name} \\ ${g.name}`, ...gi.names], ...cats.map((c, r) => [c, ...counts[r]])],
+        [[`${x.name} \\ ${g.name}`, ...gi.names], ...cats.map((c, r) => [c, ...shownCells[r]])],
       );
     }
 
@@ -287,9 +309,10 @@ export function buildChart(spec: ChartSpec, ds: Dataset): ChartResult {
       const ys = numsOf(val);
       const gi = by ? groupIndex(by, MAX_SERIES) : { names: ['All'], of: () => [0] };
       const buckets = gi.names.map(() => [] as number[]);
-      ys.forEach((v, i) => { if (v != null) for (const k of gi.of(i)) buckets[k].push(v); });
+      const wbuckets = gi.names.map(() => [] as number[]);
+      ys.forEach((v, i) => { if (v != null) for (const k of gi.of(i)) { buckets[k].push(v); wbuckets[k].push(ds.weights?.[i] ?? 1); } });
       const stats: string[] = [];
-      const kept = gi.names.map((n, k) => ({ n, xs: buckets[k] })).filter((b) => b.xs.length);
+      const kept = gi.names.map((n, k) => ({ n, xs: buckets[k], ws: wbuckets[k] })).filter((b) => b.xs.length);
       if (by) {
         if (kept.length === 2 && by.kind !== 'multi') {
           const t: TTest | null = welchT(kept[0].xs, kept[1].xs, [kept[0].n, kept[1].n]);
@@ -316,10 +339,20 @@ export function buildChart(spec: ChartSpec, ds: Dataset): ChartResult {
         return { ...res({ kind: 'box', groups }, xl, spec.ylabel ?? label(val), stats, table), title: spec.title || val.label };
       }
       const groups = kept.map((b) => {
+        if (ds.weights) {
+          // Weighted mean; the interval uses the effective sample size (Kish) so it is not too narrow.
+          const sw = b.ws.reduce((a, w) => a + w, 0), sw2 = b.ws.reduce((a, w) => a + w * w, 0);
+          const m = b.xs.reduce((a, x, i) => a + x * b.ws[i], 0) / sw;
+          const neff = (sw * sw) / sw2;
+          const v = sw > 1 ? b.xs.reduce((a, x, i) => a + b.ws[i] * (x - m) ** 2, 0) / sw : 0;
+          const half = neff > 1 ? tCrit95(Math.max(1, neff - 1)) * Math.sqrt(v * neff / (neff - 1)) / Math.sqrt(neff) : 0;
+          return { name: b.n, n: b.xs.length, mean: m, lo: m - half, hi: m + half };
+        }
         const d = describe(b.xs);
         const half = d.n > 1 ? tCrit95(d.n - 1) * (d.sd! / Math.sqrt(d.n)) : 0;
         return { name: b.n, n: d.n, mean: d.mean!, lo: d.mean! - half, hi: d.mean! + half };
       });
+      if (ds.weights) stats.unshift('Weighted means; intervals use the effective sample size. The test uses unweighted data.');
       return { ...res({ kind: 'means', groups }, xl, spec.ylabel ?? `Mean ${val.name} (95% CI)`, stats, table), title: spec.title || val.label };
     }
 

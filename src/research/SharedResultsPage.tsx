@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getSharedResults } from '../lib/api/research';
 import { fieldStats, overview } from '../lib/research/analytics';
 import { scoreResponses } from '../lib/research/formula';
+import { computeWeights } from '../lib/research/weights';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, PageLoader, Stat, cx } from '../components/ui';
@@ -18,7 +19,9 @@ export function SharedResultsPage() {
   const tab = params.get('view') === 'studio' ? 'studio' : 'summary';
   const q = useQuery({ queryKey: ['rh', 'shared', token], queryFn: () => getSharedResults(token), retry: 1 });
   const d = useMemo(() => (q.data ? { ...q.data, responses: scoreResponses(q.data.fields, q.data.responses) } : q.data), [q.data]);
-  const stats = useMemo(() => (d ? d.fields.map((f) => fieldStats(f, d.responses)) : []), [d]);
+  const weighting = useMemo(() => (d?.weighting?.enabled && d.weighting.targets?.length ? computeWeights(d.fields, d.responses, d.weighting.targets) : null), [d]);
+  const weights = weighting && !weighting.errors.length ? weighting.weights : null;
+  const stats = useMemo(() => (d ? d.fields.map((f) => fieldStats(f, d.responses, weights)) : []), [d, weights]);
   const ov = useMemo(() => (d ? overview(d.fields, d.responses) : null), [d]);
   useEffect(() => {
     if (d) document.title = `${d.title} — results`;
@@ -60,7 +63,7 @@ export function SharedResultsPage() {
       {d.responses.length === 0 ? (
         <p className="text-sm text-slate-600">No responses yet.</p>
       ) : tab === 'studio' ? (
-        <ChartStudio key={params.get('x') ?? ''} title={d.title} fields={d.fields} responses={d.responses} initialVar={params.get('x')} includeEmail={false} />
+        <ChartStudio key={params.get('x') ?? ''} title={d.title} fields={d.fields} responses={d.responses} weights={weights} initialVar={params.get('x')} includeEmail={false} />
       ) : (
         <div className="space-y-3">
           {ov.perDay.length > 1 && (
@@ -73,7 +76,7 @@ export function SharedResultsPage() {
         </div>
       )}
       <p className="text-xs text-slate-500">
-        Shared from ResearchHub (ScreenLab). Email-address answers are never shown{d.include_text ? '' : ', and open-text answers are hidden'}. Question numbers (Q1, Q2 …) follow the questions shown here.
+        Shared from ResearchHub (ScreenLab).{weights ? ' Percentages and means are weighted to population targets.' : ''} Email-address answers are never shown{d.include_text ? '' : ', and open-text answers are hidden'}. Question numbers (Q1, Q2 …) follow the questions shown here.
       </p>
     </div>
   );

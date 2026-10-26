@@ -946,6 +946,61 @@ try {
   check('Phase 2: reminders go only to people who have not responded', outbox().length === 3 && outbox()[2].to === 'kofi@example.com' && outbox()[2].kind === 'reminder');
   await shot(page, '35d-rh-invitations');
 
+  // ---------------------------------------------------------------- ResearchHub Phase 3
+  // Data quality (time taken, flags, set aside), weighting and regression.
+  check('Phase 3: time taken is recorded for new responses', Number(sql(`select count(duration_s) from rh_responses where project_id='${wbId}'`)) >= 1);
+  const seedRows = [['200', 6, 4, 300], ['100', 7, 2, 280], ['200', 9, 5, 320], ['100', 6, 4, 310], ['200', 10, 3, 290], ['100', 4, 1, 330], ['200', 8, 3, 305], ['100', 10, 5, 20], ['200', 9, 5, 295]];
+  for (const [lvl, hrs, sc, dur] of seedRows) {
+    sql(`insert into rh_responses(project_id, answers, duration_s) values ('${wbId}', '${JSON.stringify({ [wbFields[0]]: lvl, [wbFields[1]]: hrs, [wbFields[2]]: sc })}'::jsonb, ${dur})`);
+  }
+  await page.goto(`${APP}/research/${wbId}/responses?view=clean`);
+  await page.getByTestId('rh-clean').waitFor();
+  const cleanText = await page.getByTestId('rh-clean').textContent();
+  check('Phase 3: a response much faster than usual is flagged', /Took 20 s; the typical time is/.test(cleanText));
+  check('Phase 3: identical answers are flagged as a possible duplicate', /Exactly the same answers as response #\d+/.test(cleanText));
+  await page.getByTestId('rh-flag-speeder').click();
+  const speeders = await page.getByTestId('rh-flag-row').count();
+  page.once('dialog', (d) => d.accept());
+  await page.getByTestId('rh-exclude-all').click();
+  await page.getByTestId('rh-setaside-count').waitFor();
+  check('Phase 3: flagged responses can be set aside (not deleted)',
+    sql(`select count(*) filter (where excluded) || ',' || count(*) from rh_responses where project_id='${wbId}'`) === `${speeders},12`, `${speeders} speeders`);
+  await shot(page, '36a-rh-data-quality');
+
+  // Weighting: the level mix in the sample is not the population's
+  await page.getByTestId('rh-add-weight').click();
+  await page.getByLabel('Population % for 100').fill('30');
+  await page.getByLabel('Population % for 200').fill('70');
+  await page.getByTestId('rh-weight-summary').waitFor();
+  check('Phase 3: weighting shows its design effect before it is applied', /Design effect [\d.]+/.test(await page.getByTestId('rh-weight-summary').textContent()));
+  await page.getByTestId('rh-weight-save').click();
+  await page.getByTestId('rh-weighting-on').waitFor();
+  check('Phase 3: weighting targets are saved with the questionnaire', sql(`select analysis->'weighting'->'targets'->0->'targets'->>'200' from rh_projects where id='${wbId}'`) === '70');
+  await shot(page, '36b-rh-weighting');
+  await page.getByRole('tab', { name: 'Summary' }).click();
+  await page.getByTestId('rh-weighted-status').waitFor();
+  const levelCard = await page.getByTestId('rh-question-stats').filter({ hasText: 'Which level are you in?' }).textContent();
+  check('Phase 3: the summary shows weighted percentages that hit the targets', /Weighted %/.test(levelCard) && /30%/.test(levelCard) && /70%/.test(levelCard), levelCard.slice(0, 160));
+
+  // Regression
+  await page.getByRole('tab', { name: 'Regression' }).click();
+  await page.getByTestId('rh-regression').waitFor();
+  await page.getByLabel('Outcome (what you want to explain)').selectOption({ label: 'Q4. Wellbeing score' });
+  await page.getByTestId('rh-regression-summary').waitFor();
+  const regText = await page.getByTestId('rh-regression-summary').textContent();
+  check('Phase 3: linear regression explains the score in plain words', /Linear regression of Q4/.test(regText) && /R² =/.test(regText) && /weighted/.test(regText), regText.slice(0, 200));
+  check('Phase 3: the regression table compares levels with the reference group', /Q1: “200” vs “100”/.test(await page.getByTestId('rh-regression-table').textContent()));
+  const [rDl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('rh-regression-r').click()]);
+  check('Phase 3: the model downloads as an R script with the same weights', /lm\(Q4 ~ .*weights = weight\)/.test(fs.readFileSync(await rDl.path(), 'utf8')));
+  await page.getByLabel('Outcome (what you want to explain)').selectOption({ label: 'Q1. Which level are you in?' });
+  await page.getByText(/Logistic regression: the chance that Q1 is “200”/).waitFor();
+  check('Phase 3: a two-answer outcome gives logistic regression with odds ratios', /Odds ratio/.test(await page.getByTestId('rh-regression-table').textContent()));
+  await shot(page, '36c-rh-regression');
+  await page.getByRole('tab', { name: 'Chart studio' }).click();
+  await page.getByTestId('rh-studio-cmd').fill('fitlm(Q1, Q3, Q4)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  check('Phase 3: regression from the command window', /Linear regression of Q4/.test(await page.getByTestId('rh-studio-log').textContent()));
+
   // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
   await page.goto(`${APP}/p/${projectId}/methods`);
   await page.getByTestId('prisma-diagram').locator('svg').waitFor();

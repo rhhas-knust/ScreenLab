@@ -60,6 +60,13 @@ export const isFileAnswer = (v: unknown): v is FileAnswer =>
   !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as FileAnswer).file === 'string' && typeof (v as FileAnswer).name === 'string';
 
 export interface Quota { field: string; value: string; limit: number; message?: string }
+/** Weighting targets: for each question, the population share (%) of each answer. */
+export interface WeightTarget { field: string; targets: Record<string, number> }
+export interface AnalysisOptions {
+  weighting?: { enabled?: boolean; targets?: WeightTarget[] };
+  /** Data-quality thresholds. */
+  quality?: { speeder_ratio?: number; min_completion?: number };
+}
 export interface FormOptions { randomize_questions?: boolean; quotas?: Quota[] }
 export const scaleRange = (s: FieldSettings | undefined) => {
   const min = s?.min === 0 ? 0 : 1;
@@ -106,6 +113,7 @@ export interface RhProject {
   results_token?: string | null;
   results_include_text?: boolean;
   form_options?: FormOptions;
+  analysis?: AnalysisOptions;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +149,11 @@ export interface RhResponse {
   consent_at?: string | null;
   language?: string | null;
   codes?: Record<string, string[]>;
+  /** Seconds from when the questions appeared to submission (v4). */
+  duration_s?: number | null;
+  /** Set aside from analysis by the owner (v4); nothing is deleted. */
+  excluded?: boolean;
+  exclude_reason?: string | null;
 }
 
 export type ClosedReason = 'closed' | 'deadline' | 'full' | null;
@@ -264,7 +277,7 @@ export async function getPublicForm(id: string): Promise<PublicForm | null> {
   return must(await supabase.rpc('rh_public_form', { p_project_id: id })) as PublicForm | null;
 }
 
-export interface SubmitMeta { consent?: boolean; language?: string | null; device?: string | null; invite?: string | null; client_id?: string | null; collected_at?: string | null }
+export interface SubmitMeta { consent?: boolean; language?: string | null; device?: string | null; invite?: string | null; client_id?: string | null; collected_at?: string | null; started_at?: string | null }
 
 export async function submitResponse(id: string, answers: Record<string, AnswerValue>, meta: SubmitMeta = {}): Promise<string> {
   const res = await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers, p_meta: meta });
@@ -273,6 +286,13 @@ export async function submitResponse(id: string, answers: Record<string, AnswerV
     return must(await supabase.rpc('rh_submit_response', { p_project_id: id, p_answers: answers })) as string;
   }
   return must(res) as string;
+}
+
+/** Set responses aside from analysis (or bring them back). Nothing is deleted. */
+export async function setExcluded(ids: string[], excluded: boolean, reason: string | null = null): Promise<void> {
+  for (let i = 0; i < ids.length; i += 200) {
+    must(await supabase.from('rh_responses').update({ excluded, exclude_reason: excluded ? reason : null }).in('id', ids.slice(i, i + 200)).select('id'));
+  }
 }
 
 /** Save the owner's theme codes for one response. */
@@ -308,6 +328,8 @@ export interface SharedResults {
   year: string | null;
   status: FormStatus;
   include_text: boolean;
+  /** The owner's weighting targets, when weighting is on (v4). */
+  weighting?: AnalysisOptions['weighting'] | null;
   fields: RhField[];
   responses: RhResponse[];
 }
@@ -348,7 +370,7 @@ function csvColumns(f: RhField): { head: string; get: (r: RhResponse) => string 
 }
 
 /** One row per response, one column per question (Excel-friendly, with BOM). */
-export function responsesToCsv(fields: RhField[], responses: RhResponse[], languages: Translations = {}): string {
+export function responsesToCsv(fields: RhField[], responses: RhResponse[], languages: Translations = {}, weights?: Map<string, number> | null): string {
   const cols = fields.flatMap((f) => {
     const c = csvColumns(f);
     if (responses.some((r) => r.codes?.[f.id]?.length)) c.push({ head: `${f.label} — codes`, get: (r) => (r.codes?.[f.id] ?? []).join('; ') });
@@ -358,6 +380,8 @@ export function responsesToCsv(fields: RhField[], responses: RhResponse[], langu
   const extra: { head: string; get: (r: RhResponse) => string }[] = [];
   if (responses.some((r) => r.language)) extra.push({ head: 'Language', get: (r) => (r.language ? langName.get(r.language) ?? r.language : languages.base_name || 'Original') });
   if (responses.some((r) => r.consent_at)) extra.push({ head: 'Consent given at', get: (r) => (r.consent_at ? new Date(r.consent_at).toISOString() : '') });
+  if (responses.some((r) => typeof r.duration_s === 'number')) extra.push({ head: 'Time taken (seconds)', get: (r) => (typeof r.duration_s === 'number' ? String(r.duration_s) : '') });
+  if (weights) extra.push({ head: 'Weight', get: (r) => String(Math.round((weights.get(r.id) ?? 1) * 1e6) / 1e6) });
   const header = ['Response #', 'Submitted at', ...cols.map((c) => c.head), ...extra.map((c) => c.head)];
   const rows = responses.map((r, i) => [String(i + 1), new Date(r.submitted_at).toISOString(), ...cols.map((c) => c.get(r)), ...extra.map((c) => c.get(r))]);
   return '\ufeff' + Papa.unparse([header, ...rows]);

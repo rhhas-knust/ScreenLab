@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { getRhProject, latestSummary, listFields, listResponses, rk } from '../lib/api/research';
 import { fieldStats, overview } from '../lib/research/analytics';
 import { scoreResponses } from '../lib/research/formula';
+import { analysed } from '../lib/research/quality';
+import { computeWeights } from '../lib/research/weights';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, Button, PageLoader } from '../components/ui';
@@ -22,8 +24,12 @@ export function ReportPage() {
   const fq = useQuery({ queryKey: rk.fields(formId), queryFn: () => listFields(formId) });
   const rq = useQuery({ queryKey: rk.responses(formId), queryFn: () => listResponses(formId) });
   const sq = useQuery({ queryKey: rk.summary(formId), queryFn: () => latestSummary(formId) });
-  const scored = useMemo(() => (fq.data && rq.data ? scoreResponses(fq.data, rq.data) : null), [fq.data, rq.data]);
-  const stats = useMemo(() => (fq.data && scored ? fq.data.map((f) => fieldStats(f, scored)) : []), [fq.data, scored]);
+  // Same analysis set as the Responses page: set-aside responses left out, weights applied when on.
+  const scored = useMemo(() => (fq.data && rq.data ? analysed(scoreResponses(fq.data, rq.data)) : null), [fq.data, rq.data]);
+  const wt = pq.data?.analysis?.weighting;
+  const weighting = useMemo(() => (fq.data && scored && wt?.enabled && wt.targets?.length ? computeWeights(fq.data, scored, wt.targets) : null), [fq.data, scored, wt]);
+  const weights = weighting && !weighting.errors.length ? weighting.weights : null;
+  const stats = useMemo(() => (fq.data && scored ? fq.data.map((f) => fieldStats(f, scored, weights)) : []), [fq.data, scored, weights]);
   const ov = useMemo(() => (fq.data && scored ? overview(fq.data, scored) : null), [fq.data, scored]);
 
   useEffect(() => {
@@ -54,6 +60,7 @@ export function ReportPage() {
             {fmt(ov.responses)} response{ov.responses === 1 ? '' : 's'}
             {ov.first && ` · collected ${fmtDate(ov.first, false)}${ov.last && ov.last.slice(0, 10) !== ov.first.slice(0, 10) ? ` to ${fmtDate(ov.last, false)}` : ''}`}
             {` · average completion ${ov.completion}%`}
+            {weights && ` · percentages and means weighted to population targets (design effect ${weighting!.deff})`}
           </p>
           {p.description && <p className="pt-2 text-sm text-slate-700">{p.description}</p>}
         </header>

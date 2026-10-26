@@ -6,7 +6,7 @@ import { scaleRange, type AnswerValue, type FieldType, type RhField, type RhResp
 
 export interface Bar { label: string; count: number; pct: number }
 
-interface Base { fieldId: string; label: string; type: FieldType; answered: number; missing: number }
+interface Base { fieldId: string; label: string; type: FieldType; answered: number; missing: number; /** Percentages and means use survey weights (counts stay as people). */ weighted?: boolean }
 export interface NumericStats extends Base {
   kind: 'numeric';
   mean: number | null;
@@ -94,19 +94,35 @@ export function numericBars(xs: number[], type: FieldType, points = [1, 2, 3, 4,
   });
 }
 
-export function fieldStats(field: RhField, responses: RhResponse[]): FieldStats {
-  const values = responses.map((r) => r.answers[field.id]).filter((v) => !isBlank(v));
-  const base = { fieldId: field.id, label: field.label, type: field.type, answered: values.length, missing: responses.length - values.length };
+/**
+ * Statistics for one question. With `weights`, percentages of choice,
+ * checkbox and scale answers and the mean/SD of numbers are weighted; counts,
+ * medians and ranges stay as plain counts of people.
+ */
+export function fieldStats(field: RhField, responses: RhResponse[], weights?: Map<string, number> | null): FieldStats {
+  const answeredRs = responses.filter((r) => !isBlank(r.answers[field.id]));
+  const values = answeredRs.map((r) => r.answers[field.id]);
+  const wOf = (r: RhResponse) => (weights ? weights.get(r.id) ?? 1 : 1);
+  const weighted = !!weights && (field.type === 'radio' || field.type === 'checkbox' || field.type === 'number' || field.type === 'scale' || field.type === 'calc');
+  const base = { fieldId: field.id, label: field.label, type: field.type, answered: values.length, missing: responses.length - values.length, ...(weighted ? { weighted } : {}) };
 
   if (field.type === 'file' || field.type === 'signature') return { ...base, kind: 'files' };
 
   if (field.type === 'number' || field.type === 'scale' || field.type === 'calc') {
-    const xs = values.map((v) => Number(v)).filter((n) => Number.isFinite(n));
-    return {
-      ...base, kind: 'numeric', mean: mean(xs), median: median(xs), sd: sd(xs),
-      min: xs.length ? Math.min(...xs) : null, max: xs.length ? Math.max(...xs) : null,
-      bars: numericBars(xs, field.type, scaleRange(field.settings).points),
-    };
+    const pairs = answeredRs.map((r) => [Number(r.answers[field.id]), wOf(r)] as const).filter(([x]) => Number.isFinite(x));
+    const xs = pairs.map(([x]) => x);
+    const bars = numericBars(xs, field.type, scaleRange(field.settings).points);
+    if (!weighted) {
+      return { ...base, kind: 'numeric', mean: mean(xs), median: median(xs), sd: sd(xs), min: xs.length ? Math.min(...xs) : null, max: xs.length ? Math.max(...xs) : null, bars };
+    }
+    // Weighted mean and SD (frequency-weight formula, as SPSS WEIGHT BY and Hmisc::wtd.var).
+    const sw = pairs.reduce((s, [, w]) => s + w, 0);
+    const wm = sw ? pairs.reduce((s, [x, w]) => s + x * w, 0) / sw : null;
+    const wsd = wm != null && sw > 1 ? Math.sqrt(pairs.reduce((s, [x, w]) => s + w * (x - wm) ** 2, 0) / (sw - 1)) : null;
+    if (field.type === 'scale') {
+      for (const b of bars) { const v = Number(b.label); const wv = pairs.filter(([x]) => x === v).reduce((s, [, w]) => s + w, 0); b.pct = sw ? round((wv / sw) * 100, 1) : 0; }
+    }
+    return { ...base, kind: 'numeric', mean: wm, median: median(xs), sd: wsd, min: xs.length ? Math.min(...xs) : null, max: xs.length ? Math.max(...xs) : null, bars };
   }
 
   if (field.type === 'grid') {
@@ -145,7 +161,10 @@ export function fieldStats(field: RhField, responses: RhResponse[]): FieldStats 
     for (const v of values) {
       for (const choice of Array.isArray(v) ? v : [String(v)]) counts.set(choice, (counts.get(choice) ?? 0) + 1);
     }
-    const bars = [...counts].map(([label, count]) => ({ label, count, pct: pct(count, values.length) }));
+    const wsum = new Map<string, number>();
+    let wall = 0;
+    if (weighted) for (const r of answeredRs) { const v = r.answers[field.id]; const w = wOf(r); wall += w; for (const c of Array.isArray(v) ? v : [String(v)]) wsum.set(c, (wsum.get(c) ?? 0) + w); }
+    const bars = [...counts].map(([label, count]) => ({ label, count, pct: weighted ? (wall ? round(((wsum.get(label) ?? 0) / wall) * 100, 1) : 0) : pct(count, values.length) }));
     return field.type === 'radio' ? { ...base, kind: 'choice', bars } : { ...base, kind: 'multi', bars };
   }
 

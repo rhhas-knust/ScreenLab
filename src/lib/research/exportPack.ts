@@ -20,6 +20,8 @@ export function columns(ds: Dataset, opts: { includeEmail?: boolean } = {}): Col
     if (v.kind === 'multi') v.categories.forEach((o, j) => out.push({ name: `${v.name}_${j + 1}`, label: `${v.label} — ${o}`, v, option: o, kind: 'dummy' }));
     else out.push({ name: v.name, label: v.label, v, kind: v.kind === 'numeric' ? 'number' : 'string' });
   }
+  // Survey weights travel with the data, so the scripts can give the same weighted results.
+  if (ds.weights) out.push({ name: 'weight', label: 'Survey weight from ResearchHub (raking to population targets; mean 1)', v: { name: 'weight', label: 'Survey weight', kind: 'numeric', categories: [], values: ds.weights.map((w) => Math.round(w * 1e6) / 1e6) }, kind: 'number' });
   return out;
 }
 
@@ -47,8 +49,8 @@ export function codebookCsv(ds: Dataset, cols = columns(ds)): string {
 // ---------------------------------------------------------------------------
 // MATLAB
 // ---------------------------------------------------------------------------
-const mq = (s: string) => `"${s.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
-const mArr = (xs: string[]) => `[${xs.map(mq).join(', ')}]`;
+export const mq = (s: string) => `"${s.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+export const mArr = (xs: string[]) => `[${xs.map(mq).join(', ')}]`;
 
 /** MATLAB lines that define `name` as a categorical (or `nameX` as a 0/1 matrix for checkboxes). */
 function mCat(v: StudioVar, name: string): string[] {
@@ -155,8 +157,8 @@ function matlab(spec: ChartSpec, ds: Dataset, chart: ChartResult, cols: Column[]
 // ---------------------------------------------------------------------------
 // R (base R only, no packages to install)
 // ---------------------------------------------------------------------------
-const rq = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`;
-const rVec = (xs: string[]) => `c(${xs.map(rq).join(', ')})`;
+export const rq = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`;
+export const rVec = (xs: string[]) => `c(${xs.map(rq).join(', ')})`;
 function rCat(v: StudioVar, name: string): string[] {
   if (v.kind === 'multi') return [`${name}_cats <- ${rVec(v.categories)}`, `${name}_X <- d[, ${rVec(v.categories.map((_, j) => `${v.name}_${j + 1}`))}] == 1`];
   return [`${name} <- factor(d$${v.name}, levels = ${v.scale ? `c(${v.categories.join(', ')})` : rVec(v.categories)})`];
@@ -227,7 +229,7 @@ function rScript(spec: ChartSpec, ds: Dataset, chart: ChartResult, cols: Column[
 // ---------------------------------------------------------------------------
 // SPSS syntax and Stata do-file
 // ---------------------------------------------------------------------------
-const sq = (s: string) => `'${s.replace(/'/g, "''").replace(/\r?\n/g, ' ').slice(0, 250)}'`;
+export const sq = (s: string) => `'${s.replace(/'/g, "''").replace(/\r?\n/g, ' ').slice(0, 250)}'`;
 
 function spss(spec: ChartSpec, ds: Dataset, chart: ChartResult, cols: Column[]): string {
   const x = findVar(ds, spec.x)!, y = findVar(ds, spec.y), g = findVar(ds, spec.group);

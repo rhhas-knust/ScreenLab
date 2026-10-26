@@ -3,6 +3,11 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { answerText, deleteResponse, fileUrl, isFileAnswer, type RhField, getRhProject, listFields, listResponses, responsesToCsv, rk } from '../lib/api/research';
 import { scoreResponses } from '../lib/research/formula';
+import { analysed, qualityFlags } from '../lib/research/quality';
+import { computeWeights } from '../lib/research/weights';
+import { buildDataset } from '../lib/research/studio';
+import { CleanWeightPanel } from './CleanWeightPanel';
+import { RegressionPanel } from './RegressionPanel';
 import { quotaCount } from './QuotasEditor';
 import { downloadText, safeFileName } from '../lib/export/formats';
 import { friendlyError } from '../lib/errors';
@@ -28,12 +33,20 @@ export function ResponsesPage() {
   const rq = useQuery({ queryKey: rk.responses(formId), queryFn: () => listResponses(formId), refetchInterval: 30_000 });
   const [params, setParams] = useSearchParams();
   const view = params.get('view');
-  const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' ? view : 'summary';
+  const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' || view === 'regression' || view === 'clean' ? view : 'summary';
   const [filters, setFilters] = useState<Filter[]>([]);
   // Calculated scores are worked out from the answers here, so every view, chart and download has them.
   const scored = useMemo(() => (fq.data && rq.data ? scoreResponses(fq.data, rq.data) : null), [fq.data, rq.data]);
-  const filtered = useMemo(() => (fq.data && scored ? applyFilters(fq.data, scored, filters) : []), [fq.data, scored, filters]);
-  const stats = useMemo(() => (fq.data ? fq.data.map((f) => fieldStats(f, filtered)) : []), [fq.data, filtered]);
+  const [includeSetAside, setIncludeSetAside] = useState(false);
+  const analysis = pq.data?.analysis;
+  const flags = useMemo(() => (fq.data && scored ? qualityFlags(fq.data, scored, { speederRatio: analysis?.quality?.speeder_ratio, minCompletion: analysis?.quality?.min_completion }) : new Map()), [fq.data, scored, analysis?.quality]);
+  // Set-aside responses leave every analysis; weights are worked out on what remains.
+  const active = useMemo(() => (scored ? analysed(scored, includeSetAside) : []), [scored, includeSetAside]);
+  const weighting = useMemo(() => (fq.data && analysis?.weighting?.enabled && analysis.weighting.targets?.length ? computeWeights(fq.data, active, analysis.weighting.targets) : null), [fq.data, active, analysis?.weighting]);
+  const weights = weighting && !weighting.errors.length ? weighting.weights : null;
+  const filtered = useMemo(() => (fq.data ? applyFilters(fq.data, active, filters) : []), [fq.data, active, filters]);
+  const stats = useMemo(() => (fq.data ? fq.data.map((f) => fieldStats(f, filtered, weights)) : []), [fq.data, filtered, weights]);
+  const regData = useMemo(() => (fq.data ? buildDataset(fq.data, filtered, weights) : null), [fq.data, filtered, weights]);
   const ov = useMemo(() => (fq.data && scored ? overview(fq.data, filtered) : null), [fq.data, scored, filtered]);
 
   if (pq.error) return <div className="p-6"><Alert>{friendlyError(pq.error, 'Questionnaire not found.')}</Alert></div>;
@@ -43,8 +56,9 @@ export function ResponsesPage() {
   const responses = scored;
   const quotas = (project.form_options?.quotas ?? []).filter((q) => q.value && q.limit);
 
-  const isFiltered = filtered.length !== responses.length || filters.length > 0;
-  const exportCsv = () => downloadText(`${safeFileName(project.title)}_responses${isFiltered ? '_filtered' : ''}.csv`, responsesToCsv(fields, filtered, project.translations ?? {}), 'text/csv');
+  const setAside = responses.filter((r) => r.excluded).length;
+  const isFiltered = filtered.length !== active.length || filters.length > 0;
+  const exportCsv = () => downloadText(`${safeFileName(project.title)}_responses${isFiltered ? '_filtered' : ''}.csv`, responsesToCsv(fields, filtered, project.translations ?? {}, weights), 'text/csv');
   const num = new Map(responses.map((r, i) => [r.id, i + 1]));
   const remove = async (id: string, n: number) => {
     if (!window.confirm(`Delete response #${n}? This cannot be undone.`)) return;
@@ -69,6 +83,7 @@ export function ResponsesPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-semibold text-ink-900">{project.title}</h1>
           <p className="text-sm text-slate-600" data-testid="rh-response-count">{fmt(responses.length)} response{responses.length === 1 ? '' : 's'}</p>
+          {setAside > 0 && <p className="text-xs text-slate-500" data-testid="rh-setaside-count">{setAside} set aside {includeSetAside ? '(included in this view)' : 'and left out of the analysis'}</p>}
         </div>
         <Link to={`/research/${formId}/report`} className={cx('inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50', !responses.length && 'pointer-events-none opacity-50')} aria-disabled={!responses.length}>
           PDF report
@@ -85,16 +100,28 @@ export function ResponsesPage() {
       ) : (
         <>
           <div role="tablist" aria-label="Responses view" className="flex gap-1 border-b border-slate-200">
-            {([['summary', 'Summary'], ['studio', 'Chart studio'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['table', 'Individual responses']] as const).map(([k, label]) => (
+            {([['summary', 'Summary'], ['studio', 'Chart studio'], ['regression', 'Regression'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['clean', 'Clean & weight'], ['table', 'Individual responses']] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams(k === 'summary' ? {} : { view: k }, { replace: true })}
                 className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-ink-700 text-ink-900' : 'border-transparent text-slate-600 hover:text-ink-900')}>
                 {label}
               </button>
             ))}
           </div>
-          <FilterBar fields={fields} filters={filters} onChange={setFilters} matched={filtered.length} total={responses.length} />
-          {tab === 'studio' ? (
-            <ChartStudio key={params.get('x') ?? ''} title={project.title} fields={fields} responses={filtered} initialVar={params.get('x')} />
+          {tab !== 'clean' && <FilterBar fields={fields} filters={filters} onChange={setFilters} matched={filtered.length} total={active.length} />}
+          {tab !== 'clean' && (weighting || setAside > 0) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" data-testid="rh-analysis-status">
+              {weighting && (weighting.errors.length
+                ? <span className="text-amber-800">Weighting is on but cannot be applied: {weighting.errors[0]} <button type="button" className="underline" onClick={() => setParams({ view: 'clean' }, { replace: true })}>Fix it</button></span>
+                : <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-violet-900" data-testid="rh-weighted-status">Weighted results · design effect {weighting.deff} · effective n {Math.round(weighting.neff)}</span>)}
+              {setAside > 0 && <label className="flex items-center gap-1.5 text-slate-700"><input type="checkbox" checked={includeSetAside} onChange={(e) => setIncludeSetAside(e.target.checked)} /> Include the {setAside} set-aside response{setAside === 1 ? '' : 's'}</label>}
+            </div>
+          )}
+          {tab === 'clean' ? (
+            <CleanWeightPanel project={project} fields={fields} responses={responses} flags={flags} />
+          ) : tab === 'regression' && regData ? (
+            <RegressionPanel title={project.title} ds={regData} />
+          ) : tab === 'studio' ? (
+            <ChartStudio key={params.get('x') ?? ''} title={project.title} fields={fields} responses={filtered} weights={weights} initialVar={params.get('x')} />
           ) : tab === 'crosstab' ? (
             <CrossTabPanel title={project.title} fields={fields} responses={filtered} />
           ) : tab === 'coding' ? (

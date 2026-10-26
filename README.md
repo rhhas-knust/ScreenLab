@@ -194,6 +194,23 @@ survey data for their project:
      Resend). Without them, download the links for a Gmail/Outlook mail merge or use the
      per-person email and WhatsApp buttons.
 
+9. **Phase 3: clean, weight and model**
+   - *Data quality* (Clean & weight tab) flags responses that were very fast (under 40% of the
+     typical time — the time taken is recorded from the moment the questions appear),
+     gave the same answer to a whole grid or every scale, duplicated another response or
+     email address, or left most questions blank. Flags are for review only; *Set aside*
+     removes a response from statistics, charts, regression, downloads, the report, the AI
+     summary and results links without deleting it, and *Bring back* restores it.
+   - *Weighting* — enter population percentages for one or more questions (e.g. gender,
+     level); ResearchHub rakes the weights (as R's `survey::rake`), shows the design effect
+     and effective sample size, and then reports weighted percentages and means everywhere.
+     Counts stay as numbers of people; significance tests use unweighted data unless stated.
+   - *Regression* — linear (numbers and scores) and logistic (yes/no, or one answer vs the
+     rest), with choice questions as dummy variables against their first answer, optional
+     weights, a plain-language reading, a table (CSV) and scripts to re-run the model in R,
+     MATLAB, SPSS or Stata. Results match R's `lm()` and `glm()` (checked in the unit tests).
+     Also from the command window: `fitlm(Q2, Q3, Q5)` and `fitglm(Q2, Q3, Q4, 'Yes')`.
+
 Security: questionnaires and answers are private to their owner (Row Level Security).
 Respondents can only load a published questionnaire and submit through a server function that
 checks every answer (required questions, number/email format, allowed options, scale 1–5),

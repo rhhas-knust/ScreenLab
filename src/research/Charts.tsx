@@ -7,14 +7,15 @@ import { fmtDate } from '../lib/hooks';
  * one hue, values printed at the bar end, hover title on each row.
  */
 export function BarList({ bars, unit = 'respondents', caption }: { bars: Bar[]; unit?: string; caption: string }) {
-  const max = Math.max(1, ...bars.map((b) => b.count));
+  // Bar length follows the percentage, so weighted results (where % is not count ÷ n) draw correctly.
+  const max = Math.max(1e-9, ...bars.map((b) => b.pct));
   return (
     <figure className="space-y-1.5" aria-label={caption}>
       {bars.map((b) => (
         <div key={b.label} className="grid grid-cols-[minmax(6rem,14rem)_1fr] items-center gap-3 text-sm" title={`${b.label}: ${b.count} ${unit} (${b.pct}%)`}>
           <span className="break-words text-slate-700">{b.label}</span>
           <span className="flex items-center gap-2">
-            <span className="h-4 rounded-r bg-ink-500 print:bg-ink-500" style={{ width: `${(b.count / max) * 100}%`, minWidth: b.count ? 4 : 0, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} />
+            <span className="h-4 rounded-r bg-ink-500 print:bg-ink-500" style={{ width: `${(b.pct / max) * 100}%`, minWidth: b.count ? 4 : 0, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} />
             <span className="shrink-0 tabular-nums text-slate-700">{b.count}<span className="text-slate-500"> · {b.pct}%</span></span>
           </span>
         </div>

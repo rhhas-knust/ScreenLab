@@ -25,11 +25,11 @@ function roles(spec: ChartSpec, ds: Dataset) {
  * command such as bar(Q1) or ttest2(Q2, Q1), then download the picture, the
  * numbers, or a ready-to-run MATLAB / R / SPSS / Stata script.
  */
-export function ChartStudio({ title, fields, responses, initialVar, includeEmail = true }: {
-  title: string; fields: RhField[]; responses: RhResponse[]; initialVar?: string | null; includeEmail?: boolean;
+export function ChartStudio({ title, fields, responses, weights, initialVar, includeEmail = true }: {
+  title: string; fields: RhField[]; responses: RhResponse[]; weights?: Map<string, number> | null; initialVar?: string | null; includeEmail?: boolean;
 }) {
   const toast = useToast();
-  const ds = useMemo(() => buildDataset(fields, responses), [fields, responses]);
+  const ds = useMemo(() => buildDataset(fields, responses, weights), [fields, responses, weights]);
   const [spec, setSpec] = useState<ChartSpec>(() => {
     const v = initialVar ? findVar(ds, initialVar) : undefined;
     if (v) return isCat(v) ? { type: 'bar', x: v.name } : isNum(v) ? { type: 'histogram', x: v.name } : v.kind === 'date' ? { type: 'line', x: v.name } : defaultSpec(ds);

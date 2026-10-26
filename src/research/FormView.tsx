@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { isUpload, scaleRange, type AnswerValue, type PublicForm, type SubmitMeta } from '../lib/api/research';
 import { buildPayload, localize, quotaMessage, validate, visibleFields, type LocalField } from '../lib/research/logic';
 import { optionOrder, pipe, randomOrder, withScores } from '../lib/research/formula';
@@ -37,6 +37,8 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState<false | SubmitOutcome>(false);
   const [files, setFiles] = useState<Record<string, PickedFile>>({});
+  // When the questions first appeared, for the time-taken check (speeders).
+  const started = useRef<string | null>(null);
   // Randomised question and option order, fixed for this respondent while the page is open.
   const [order] = useState(() => (form.randomize_questions ? randomOrder(form.fields) : form.fields).map((f) => f.id));
   const [optOrder] = useState(() => Object.fromEntries(form.fields.filter((f) => f.settings?.shuffle_options)
@@ -91,7 +93,7 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
     setServerError(null);
     try {
       const upl = Object.fromEntries(asked.filter((f) => isUpload(f.type) && files[f.id]).map((f) => [f.id, files[f.id]]));
-      const outcome = await onSubmit(buildPayload(form.fields, answers), { consent: needsConsent ? consent === 'agreed' : undefined, language: lang }, upl);
+      const outcome = await onSubmit(buildPayload(form.fields, answers), { consent: needsConsent ? consent === 'agreed' : undefined, language: lang, started_at: started.current }, upl);
       setDone(outcome || 'sent');
       window.scrollTo(0, 0);
     } catch (err) {
@@ -141,7 +143,7 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
             ))}
           </dl>
         )}
-        {done && !form.one_per_device && <Button className="mt-5" onClick={() => { setAnswers({}); setFiles({}); setDone(false); }}>Submit another response</Button>}
+        {done && !form.one_per_device && <Button className="mt-5" onClick={() => { setAnswers({}); setFiles({}); setDone(false); started.current = null; }}>Submit another response</Button>}
       </div>
     );
   } else if (needsConsent && consent === 'declined') {
@@ -166,7 +168,7 @@ export function FormView({ form, preview = false, alreadyDone = false, onSubmit 
     );
   } else {
     body = (
-      <form onSubmit={submit} noValidate className="space-y-4">
+      <form onSubmit={submit} noValidate className="space-y-4" ref={() => { if (!started.current) started.current = new Date().toISOString(); }}>
         {asked.length === 0 && <p className="text-sm text-slate-500">This questionnaire has no questions yet.</p>}
         {form.randomize_questions && preview && <Alert kind="info">Questions appear in a random order for each respondent. Reload the preview to see another order.</Alert>}
         {shown.map((f) => f.type === 'calc' ? (
