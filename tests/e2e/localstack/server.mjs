@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
+import { checkWebhookUrl, hmacHex, sha256Hex, tableRows, toCsv, toJson, webhookPayload } from '../../../supabase/functions/rh-api/format.mjs';
 
 const PORT = Number(process.env.STACK_PORT ?? 54321);
 const DB = process.env.STACK_DB ?? 'postgres://postgres@localhost:54329/screenlab?host=/tmp/sl-pg';
@@ -138,6 +139,87 @@ async function handleRhInvite(req, res, body) {
     return { status: 200, body: { sent: targets.length, skipped: invite_ids.length - targets.length, failed: [] } };
   });
   return send(res, out.status, out.body);
+}
+
+/**
+ * Stand-in for the rh-api Edge Function (same routes and checks; plain SQL as
+ * the service role). Webhooks may point at http://localhost here so the test
+ * can receive them.
+ */
+async function rhApiForm(projectId) {
+  const form = (await pool.query('select id, title, owner_id from rh_projects where id = $1', [projectId])).rows[0];
+  const fields = (await pool.query('select id, label, type, options, settings from rh_fields where project_id = $1 order by field_order, created_at', [projectId])).rows;
+  return { form, fields };
+}
+async function rhDeliver(projectId, responseId, test = false, force = false) {
+  const hook = (await pool.query('select * from rh_webhooks where project_id = $1', [projectId])).rows[0];
+  if (!hook || (!hook.enabled && !test)) return { ok: false, error: 'No webhook is switched on.' };
+  const bad = checkWebhookUrl(hook.url, true);
+  if (bad) return { ok: false, error: bad };
+  const { form, fields } = await rhApiForm(projectId);
+  let logId = null, body;
+  if (test) {
+    body = JSON.stringify({ event: 'ping', form: { id: form.id, title: form.title }, sent_at: new Date().toISOString() });
+    logId = (await pool.query("insert into rh_webhook_log(project_id, event, attempts) values ($1, 'ping', 1) returning id", [projectId])).rows[0].id;
+  } else {
+    const r = (await pool.query('select id, submitted_at, answers from rh_responses where id = $1 and project_id = $2', [responseId, projectId])).rows[0];
+    if (!r) return { ok: false, error: 'Response not found' };
+    const existing = (await pool.query('select * from rh_webhook_log where response_id = $1', [r.id])).rows[0];
+    if (existing?.delivered_at) return { ok: true };
+    if (existing && existing.attempts >= 5 && !force) return { ok: false, error: 'Gave up after 5 attempts' };
+    const n = Number((await pool.query('select count(*) from rh_responses where project_id = $1 and submitted_at <= $2', [projectId, r.submitted_at])).rows[0].count);
+    body = JSON.stringify(webhookPayload(form, fields, { ...r, submitted_at: new Date(r.submitted_at).toISOString() }, n));
+    if (existing) { logId = existing.id; await pool.query('update rh_webhook_log set attempts = attempts + 1 where id = $1', [logId]); }
+    else logId = (await pool.query('insert into rh_webhook_log(project_id, response_id, attempts) values ($1, $2, 1) on conflict do nothing returning id', [projectId, r.id])).rows[0]?.id;
+    if (!logId) return { ok: true };
+  }
+  const sig = await hmacHex(hook.secret, body);
+  let status = 0, error = null;
+  try {
+    // Test only: the made-up public address https://hook.test/… goes to the e2e script's receiver.
+    const target = hook.url.replace(/^https:\/\/hook\.test/, `http://127.0.0.1:${process.env.SL_HOOK_PORT ?? 5990}`);
+    const res = await fetch(target, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10000),
+      headers: { 'Content-Type': 'application/json', 'X-ResearchHub-Event': test ? 'ping' : 'response.created', 'X-ResearchHub-Signature': `sha256=${sig}` }, body });
+    status = res.status;
+    if (!res.ok) error = `The endpoint answered HTTP ${res.status}`;
+  } catch { error = 'Could not connect to the address'; }
+  await pool.query('update rh_webhook_log set status = $2, error = $3, delivered_at = $4 where id = $1', [logId, status || null, error, error ? null : new Date()]);
+  return { ok: !error, status, error: error ?? undefined };
+}
+async function handleRhApi(req, res, url, body) {
+  if (req.method === 'GET') {
+    const key = url.searchParams.get('key') ?? req.headers['x-api-key'] ?? '';
+    if (!/^rh_[0-9a-f]{64}$/.test(key)) return send(res, 401, { error: 'Add ?key=<your API key> (made in ResearchHub → Connect).' });
+    const k = (await pool.query('select id, project_id from rh_api_keys where key_hash = $1 and revoked_at is null', [await sha256Hex(key)])).rows[0];
+    if (!k) return send(res, 401, { error: 'This API key is not valid or has been revoked.' });
+    await pool.query('update rh_api_keys set last_used_at = now() where id = $1', [k.id]);
+    const { form, fields } = await rhApiForm(k.project_id);
+    const rs = (await pool.query('select id, submitted_at, answers from rh_responses where project_id = $1 and not excluded order by submitted_at, id', [form.id])).rows
+      .map((r) => ({ ...r, submitted_at: new Date(r.submitted_at).toISOString() }));
+    if (url.searchParams.get('format') === 'csv') {
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', ...cors() });
+      return res.end(toCsv(tableRows(fields, rs)));
+    }
+    return send(res, 200, toJson(form, fields, rs));
+  }
+  const b = JSON.parse(body.toString() || '{}');
+  if (b.action === 'deliver') {
+    const r = (await pool.query('select project_id from rh_responses where id = $1', [b.response_id])).rows[0];
+    if (!r) return send(res, 404, { error: 'Response not found' });
+    return send(res, 200, await rhDeliver(r.project_id, b.response_id));
+  }
+  const claims = claimsFrom(req);
+  const p = (await pool.query('select owner_id from rh_projects where id = $1', [b.project_id])).rows[0];
+  if (claims.role !== 'authenticated' || !p || p.owner_id !== claims.sub) return send(res, 403, { error: 'Only the questionnaire’s owner can do this.' });
+  if (b.action === 'test') return send(res, 200, await rhDeliver(b.project_id, null, true));
+  if (b.action === 'retry') {
+    const todo = (await pool.query(`select r.id from rh_responses r where r.project_id = $1 and not r.excluded and r.submitted_at > now() - interval '30 days'
+      and not exists (select 1 from rh_webhook_log l where l.response_id = r.id and l.delivered_at is not null) order by r.submitted_at limit 200`, [b.project_id])).rows;
+    let sent = 0, failed = 0;
+    for (const r of todo) { const out = await rhDeliver(b.project_id, r.id, false, true); if (out.ok) sent++; else failed++; }
+    return send(res, 200, { sent, failed, remaining: 0 });
+  }
+  return send(res, 400, { error: 'Unknown action' });
 }
 
 function claimsFrom(req) {
@@ -542,6 +624,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/functions/v1/ai-screen') return await handleAiScreen(req, res, body);
     if (url.pathname === '/functions/v1/rh-summary') return await handleRhSummary(req, res, body);
     if (url.pathname === '/functions/v1/rh-invite') return await handleRhInvite(req, res, body);
+    if (url.pathname === '/functions/v1/rh-api') return await handleRhApi(req, res, url, body);
     return send(res, 404, { message: 'not found' });
   } catch (e) {
     console.error(e);

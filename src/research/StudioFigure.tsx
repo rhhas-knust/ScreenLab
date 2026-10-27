@@ -7,7 +7,7 @@ import { OTHER, SERIES, type ChartResult } from '../lib/research/studio';
  * same element downloads as SVG or PNG exactly as it looks. Hover shows a
  * tooltip (HTML, outside the SVG, so it never ends up in the download).
  */
-const W = 760, H = 440;
+export const W = 760, H = 440;
 const INK = '#16325c', TEXT2 = '#475569', MUTED = '#64748b', GRID = '#e2e8f0', AXIS = '#94a3b8', BAR = '#476ba3', BG = '#ffffff';
 const FONT = 'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
 /** Sequential blue ramp (light → dark) for heatmap cells. */
@@ -380,7 +380,11 @@ export function svgMarkup(svg: SVGSVGElement): string {
 
 /** Render the figure to a PNG at 2× (sharp in Word and PowerPoint). */
 export function svgToPng(svg: SVGSVGElement, scale = 2): Promise<Blob> {
-  const markup = svgMarkup(svg);
+  return markupToPng(svgMarkup(svg), scale);
+}
+
+/** PNG of a figure given as SVG markup (e.g. rendered off-screen for the Word report). */
+export function markupToPng(markup: string, scale = 2): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {

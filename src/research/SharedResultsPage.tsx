@@ -11,16 +11,22 @@ import { Alert, PageLoader, Stat, cx } from '../components/ui';
 import { PerDayChart } from './Charts';
 import { QuestionStats } from './QuestionStats';
 import { ChartStudio } from './ChartStudio';
+import { DashboardPanel } from './DashboardPanel';
+import { buildDataset } from '../lib/research/studio';
 
 /** Read-only results for a supervisor or co-author, opened from /r/<token>. No account needed. */
 export function SharedResultsPage() {
   const { token = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('view') === 'studio' ? 'studio' : 'summary';
+  const view = params.get('view');
   const q = useQuery({ queryKey: ['rh', 'shared', token], queryFn: () => getSharedResults(token), retry: 1 });
   const d = useMemo(() => (q.data ? { ...q.data, responses: scoreResponses(q.data.fields, q.data.responses) } : q.data), [q.data]);
   const weighting = useMemo(() => (d?.weighting?.enabled && d.weighting.targets?.length ? computeWeights(d.fields, d.responses, d.weighting.targets) : null), [d]);
   const weights = weighting && !weighting.errors.length ? weighting.weights : null;
+  const dashboard = d?.dashboard ?? [];
+  // The supervisor lands on the dashboard when the researcher has made one.
+  const tab = view === 'studio' || view === 'summary' || (view === 'dashboard' && dashboard.length) ? view : dashboard.length ? 'dashboard' : 'summary';
+  const ds = useMemo(() => (d ? buildDataset(d.fields, d.responses, weights) : null), [d, weights]);
   const stats = useMemo(() => (d ? d.fields.map((f) => fieldStats(f, d.responses, weights)) : []), [d, weights]);
   const ov = useMemo(() => (d ? overview(d.fields, d.responses) : null), [d]);
   useEffect(() => {
@@ -53,8 +59,8 @@ export function SharedResultsPage() {
         <Stat label="Collected" value={<span className="text-base">{fmtDate(ov.first, false)}</span>} sub={ov.last && ov.first?.slice(0, 10) !== ov.last.slice(0, 10) ? `to ${fmtDate(ov.last, false)}` : undefined} />
       </div>
       <div role="tablist" aria-label="Results view" className="flex gap-1 border-b border-slate-200">
-        {([['summary', 'Summary'], ['studio', 'Chart studio']] as const).map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams(k === 'summary' ? {} : { view: k }, { replace: true })}
+        {([...(dashboard.length ? [['dashboard', 'Dashboard'] as const] : []), ['summary', 'Summary'] as const, ['studio', 'Chart studio'] as const]).map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams({ view: k }, { replace: true })}
             className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-ink-700 text-ink-900' : 'border-transparent text-slate-600 hover:text-ink-900')}>
             {label}
           </button>
@@ -62,6 +68,8 @@ export function SharedResultsPage() {
       </div>
       {d.responses.length === 0 ? (
         <p className="text-sm text-slate-600">No responses yet.</p>
+      ) : tab === 'dashboard' && ds ? (
+        <DashboardPanel items={dashboard} ds={ds} completion={ov.completion} />
       ) : tab === 'studio' ? (
         <ChartStudio key={params.get('x') ?? ''} title={d.title} fields={d.fields} responses={d.responses} weights={weights} initialVar={params.get('x')} includeEmail={false} />
       ) : (

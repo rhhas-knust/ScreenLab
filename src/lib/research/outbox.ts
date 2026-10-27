@@ -2,7 +2,7 @@
 // IndexedDB (files included, as Blobs) and are sent when the connection
 // returns. Each keeps the client_id it was given, so the server stores it once
 // even if a send is retried after the connection dropped mid-way.
-import { submitResponse, uploadFormFile, type AnswerValue, type SubmitMeta } from '../api/research';
+import { pingWebhook, submitResponse, uploadFormFile, type AnswerValue, type SubmitMeta } from '../api/research';
 
 export interface OutboxFile { slot: string; blob: Blob; name: string; type: string; size: number }
 export interface OutboxItem {
@@ -14,6 +14,8 @@ export interface OutboxItem {
   created_at: string;
   /** Set when the server refused it (e.g. a quota filled up) — kept so nothing is lost silently. */
   error?: string;
+  /** The form sends new responses to a webhook. */
+  webhook?: boolean;
 }
 
 const DB = 'researchhub', STORE = 'outbox';
@@ -53,13 +55,15 @@ export function isNetworkError(e: unknown): boolean {
   return /failed to fetch|networkerror|load failed|network request failed|fetch failed|timed? ?out/i.test(msg);
 }
 
-/** Upload the files, then submit. Throws on failure (network or server). */
-export async function sendItem(item: OutboxItem): Promise<void> {
+/** Upload the files, then submit. Throws on failure (network or server). Returns the response id. */
+export async function sendItem(item: OutboxItem): Promise<string> {
   const answers = { ...item.answers };
   for (const [fid, f] of Object.entries(item.files)) {
     answers[fid] = (await uploadFormFile(item.project_id, f.slot, f)) as unknown as AnswerValue;
   }
-  await submitResponse(item.project_id, answers, { ...item.meta, client_id: item.client_id });
+  const id = await submitResponse(item.project_id, answers, { ...item.meta, client_id: item.client_id });
+  if (item.webhook && id) pingWebhook(id);
+  return id;
 }
 
 /** Send everything waiting for a form. Returns how many were sent and how many the server refused. */

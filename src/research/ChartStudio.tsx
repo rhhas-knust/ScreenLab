@@ -25,8 +25,10 @@ function roles(spec: ChartSpec, ds: Dataset) {
  * command such as bar(Q1) or ttest2(Q2, Q1), then download the picture, the
  * numbers, or a ready-to-run MATLAB / R / SPSS / Stata script.
  */
-export function ChartStudio({ title, fields, responses, weights, initialVar, includeEmail = true }: {
+export function ChartStudio({ title, fields, responses, weights, initialVar, includeEmail = true, onPin }: {
   title: string; fields: RhField[]; responses: RhResponse[]; weights?: Map<string, number> | null; initialVar?: string | null; includeEmail?: boolean;
+  /** Owner only: add the current chart to the questionnaire's dashboard. */
+  onPin?: (spec: ChartSpec) => void;
 }) {
   const toast = useToast();
   const ds = useMemo(() => buildDataset(fields, responses, weights), [fields, responses, weights]);
@@ -225,6 +227,7 @@ export function ChartStudio({ title, fields, responses, weights, initialVar, inc
             <Button size="sm" variant="secondary" onClick={csv} disabled={empty}>Chart data (CSV)</Button>
             <Button size="sm" variant="ghost" onClick={() => setShowTable((v) => !v)} disabled={empty} aria-expanded={showTable}>{showTable ? 'Hide table' : 'Show as table'}</Button>
             <span className="flex-1" />
+            {onPin && <Button size="sm" variant="secondary" onClick={() => onPin(spec)} disabled={empty} data-testid="rh-studio-pin">Pin to dashboard</Button>}
             <Button size="sm" onClick={pack} disabled={empty} data-testid="rh-studio-pack">Download for MATLAB / R / SPSS / Stata</Button>
           </div>
           <p className="text-xs text-slate-500">

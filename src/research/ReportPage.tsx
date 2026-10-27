@@ -12,6 +12,8 @@ import { Alert, Button, PageLoader } from '../components/ui';
 import { PerDayChart } from './Charts';
 import { QuestionStats } from './QuestionStats';
 import { SummaryBody } from './AiSummaryCard';
+import { DashboardPanel } from './DashboardPanel';
+import { buildDataset } from '../lib/research/studio';
 
 /**
  * Print-ready findings report. "Save as PDF" in the browser's print dialog
@@ -30,6 +32,8 @@ export function ReportPage() {
   const weighting = useMemo(() => (fq.data && scored && wt?.enabled && wt.targets?.length ? computeWeights(fq.data, scored, wt.targets) : null), [fq.data, scored, wt]);
   const weights = weighting && !weighting.errors.length ? weighting.weights : null;
   const stats = useMemo(() => (fq.data && scored ? fq.data.map((f) => fieldStats(f, scored, weights)) : []), [fq.data, scored, weights]);
+  const dashboard = pq.data?.analysis?.dashboard ?? [];
+  const ds = useMemo(() => (fq.data && scored ? buildDataset(fq.data, scored, weights) : null), [fq.data, scored, weights]);
   const ov = useMemo(() => (fq.data && scored ? overview(fq.data, scored) : null), [fq.data, scored]);
 
   useEffect(() => {
@@ -76,6 +80,13 @@ export function ReportPage() {
           <section className="break-inside-avoid space-y-2">
             <h2 className="text-lg font-semibold text-ink-900">Responses per day</h2>
             <PerDayChart days={ov.perDay} />
+          </section>
+        )}
+
+        {dashboard.length > 0 && ds && (
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold text-ink-900">Dashboard</h2>
+            <DashboardPanel items={dashboard} ds={ds} completion={ov.completion} />
           </section>
         )}
 

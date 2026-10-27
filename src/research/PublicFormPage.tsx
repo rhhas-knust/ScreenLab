@@ -84,7 +84,7 @@ export function PublicFormPage() {
     body = (
       <FormView form={f} alreadyDone={!!f.one_per_device && already} onSubmit={async (answers, meta, files) => {
         const item: OutboxItem = {
-          client_id: crypto.randomUUID(), project_id: formId, answers, created_at: new Date().toISOString(),
+          client_id: crypto.randomUUID(), project_id: formId, answers, created_at: new Date().toISOString(), webhook: !!f.has_webhook,
           meta: { ...meta, device: f.one_per_device ? deviceToken() : null, invite },
           files: Object.fromEntries(Object.entries(files).map(([fid, x]) => [fid, { ...x, slot: crypto.randomUUID() }])),
         };

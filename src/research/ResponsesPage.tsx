@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { answerText, deleteResponse, fileUrl, isFileAnswer, type RhField, getRhProject, listFields, listResponses, responsesToCsv, rk } from '../lib/api/research';
+import { answerText, deleteResponse, fileUrl, isFileAnswer, type DashboardItem, type RhField, getRhProject, latestSummary, listFields, listResponses, responsesToCsv, rk, updateRhProject } from '../lib/api/research';
 import { scoreResponses } from '../lib/research/formula';
 import { analysed, qualityFlags } from '../lib/research/quality';
 import { computeWeights } from '../lib/research/weights';
 import { buildDataset } from '../lib/research/studio';
 import { CleanWeightPanel } from './CleanWeightPanel';
 import { RegressionPanel } from './RegressionPanel';
+import { DashboardPanel } from './DashboardPanel';
+import { ConnectPanel } from './ConnectPanel';
+import { newItemId } from '../lib/research/dashboard';
 import { quotaCount } from './QuotasEditor';
-import { downloadText, safeFileName } from '../lib/export/formats';
+import { downloadBlob, downloadText, safeFileName } from '../lib/export/formats';
 import { friendlyError } from '../lib/errors';
 import { fmt, fmtDate } from '../lib/hooks';
 import { Alert, Button, Card, EmptyState, PageLoader, Select, Stat, cx } from '../components/ui';
@@ -33,11 +36,12 @@ export function ResponsesPage() {
   const rq = useQuery({ queryKey: rk.responses(formId), queryFn: () => listResponses(formId), refetchInterval: 30_000 });
   const [params, setParams] = useSearchParams();
   const view = params.get('view');
-  const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' || view === 'regression' || view === 'clean' ? view : 'summary';
+  const tab = view === 'table' || view === 'crosstab' || view === 'coding' || view === 'studio' || view === 'regression' || view === 'clean' || view === 'dashboard' || view === 'connect' ? view : 'summary';
   const [filters, setFilters] = useState<Filter[]>([]);
   // Calculated scores are worked out from the answers here, so every view, chart and download has them.
   const scored = useMemo(() => (fq.data && rq.data ? scoreResponses(fq.data, rq.data) : null), [fq.data, rq.data]);
   const [includeSetAside, setIncludeSetAside] = useState(false);
+  const [makingDoc, setMakingDoc] = useState(false);
   const analysis = pq.data?.analysis;
   const flags = useMemo(() => (fq.data && scored ? qualityFlags(fq.data, scored, { speederRatio: analysis?.quality?.speeder_ratio, minCompletion: analysis?.quality?.min_completion }) : new Map()), [fq.data, scored, analysis?.quality]);
   // Set-aside responses leave every analysis; weights are worked out on what remains.
@@ -60,6 +64,26 @@ export function ResponsesPage() {
   const isFiltered = filtered.length !== active.length || filters.length > 0;
   const exportCsv = () => downloadText(`${safeFileName(project.title)}_responses${isFiltered ? '_filtered' : ''}.csv`, responsesToCsv(fields, filtered, project.translations ?? {}, weights), 'text/csv');
   const num = new Map(responses.map((r, i) => [r.id, i + 1]));
+  const wordReport = async () => {
+    setMakingDoc(true);
+    try {
+      const [{ buildWordReport }, summary] = await Promise.all([import('./wordReport'), latestSummary(formId).catch(() => null)]);
+      const blob = await buildWordReport({ project, fields, responses: active, setAside: responses.filter((r) => r.excluded).length, weights, weighting, summary, dashboard: analysis?.dashboard ?? [] });
+      downloadBlob(`${safeFileName(project.title)}_findings_report.docx`, blob);
+    } catch (e) {
+      toast(friendlyError(e, 'The Word report could not be made.'), { kind: 'error' });
+    } finally {
+      setMakingDoc(false);
+    }
+  };
+  const saveDashboard = async (dashboard: DashboardItem[], done?: string) => {
+    try {
+      qc.setQueryData(rk.project(formId), await updateRhProject(formId, { analysis: { ...project.analysis, dashboard } }));
+      if (done) toast(done);
+    } catch (e) {
+      toast(friendlyError(e), { kind: 'error' });
+    }
+  };
   const remove = async (id: string, n: number) => {
     if (!window.confirm(`Delete response #${n}? This cannot be undone.`)) return;
     try {
@@ -88,6 +112,7 @@ export function ResponsesPage() {
         <Link to={`/research/${formId}/report`} className={cx('inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50', !responses.length && 'pointer-events-none opacity-50')} aria-disabled={!responses.length}>
           PDF report
         </Link>
+        <Button variant="secondary" onClick={wordReport} loading={makingDoc} disabled={!active.length} data-testid="rh-word-report">Word report</Button>
         <ShareResultsButton project={project} />
         <Button onClick={exportCsv} disabled={!filtered.length}>Download CSV (Excel/SPSS){isFiltered ? ` · ${filtered.length} filtered` : ''}</Button>
         <Button variant="ghost" onClick={() => rq.refetch()} loading={rq.isFetching}>Refresh</Button>
@@ -100,15 +125,15 @@ export function ResponsesPage() {
       ) : (
         <>
           <div role="tablist" aria-label="Responses view" className="flex gap-1 border-b border-slate-200">
-            {([['summary', 'Summary'], ['studio', 'Chart studio'], ['regression', 'Regression'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['clean', 'Clean & weight'], ['table', 'Individual responses']] as const).map(([k, label]) => (
+            {([['summary', 'Summary'], ['dashboard', 'Dashboard'], ['studio', 'Chart studio'], ['regression', 'Regression'], ['crosstab', 'Cross-tab'], ['coding', 'Code open answers'], ['clean', 'Clean & weight'], ['table', 'Individual responses'], ['connect', 'Connect']] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setParams(k === 'summary' ? {} : { view: k }, { replace: true })}
                 className={cx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === k ? 'border-ink-700 text-ink-900' : 'border-transparent text-slate-600 hover:text-ink-900')}>
                 {label}
               </button>
             ))}
           </div>
-          {tab !== 'clean' && <FilterBar fields={fields} filters={filters} onChange={setFilters} matched={filtered.length} total={active.length} />}
-          {tab !== 'clean' && (weighting || setAside > 0) && (
+          {tab !== 'clean' && tab !== 'connect' && <FilterBar fields={fields} filters={filters} onChange={setFilters} matched={filtered.length} total={active.length} />}
+          {tab !== 'clean' && tab !== 'connect' && (weighting || setAside > 0) && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" data-testid="rh-analysis-status">
               {weighting && (weighting.errors.length
                 ? <span className="text-amber-800">Weighting is on but cannot be applied: {weighting.errors[0]} <button type="button" className="underline" onClick={() => setParams({ view: 'clean' }, { replace: true })}>Fix it</button></span>
@@ -116,12 +141,18 @@ export function ResponsesPage() {
               {setAside > 0 && <label className="flex items-center gap-1.5 text-slate-700"><input type="checkbox" checked={includeSetAside} onChange={(e) => setIncludeSetAside(e.target.checked)} /> Include the {setAside} set-aside response{setAside === 1 ? '' : 's'}</label>}
             </div>
           )}
-          {tab === 'clean' ? (
+          {tab === 'connect' ? (
+            <ConnectPanel project={project} />
+          ) : tab === 'dashboard' && regData ? (
+            <DashboardPanel items={analysis?.dashboard ?? []} ds={regData} completion={ov?.completion ?? 0} editable onChange={saveDashboard}
+              onOpenStudio={() => setParams({ view: 'studio' }, { replace: true })} />
+          ) : tab === 'clean' ? (
             <CleanWeightPanel project={project} fields={fields} responses={responses} flags={flags} />
           ) : tab === 'regression' && regData ? (
             <RegressionPanel title={project.title} ds={regData} />
           ) : tab === 'studio' ? (
-            <ChartStudio key={params.get('x') ?? ''} title={project.title} fields={fields} responses={filtered} weights={weights} initialVar={params.get('x')} />
+            <ChartStudio key={params.get('x') ?? ''} title={project.title} fields={fields} responses={filtered} weights={weights} initialVar={params.get('x')}
+              onPin={(spec) => void saveDashboard([...(analysis?.dashboard ?? []), { id: newItemId(), kind: 'chart', spec }], 'Pinned to the dashboard')} />
           ) : tab === 'crosstab' ? (
             <CrossTabPanel title={project.title} fields={fields} responses={filtered} />
           ) : tab === 'coding' ? (

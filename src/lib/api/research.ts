@@ -62,8 +62,13 @@ export const isFileAnswer = (v: unknown): v is FileAnswer =>
 export interface Quota { field: string; value: string; limit: number; message?: string }
 /** Weighting targets: for each question, the population share (%) of each answer. */
 export interface WeightTarget { field: string; targets: Record<string, number> }
+/** A tile on the questionnaire's dashboard: a pinned Chart studio chart, or a headline number. */
+export type DashboardItem =
+  | { id: string; kind: 'chart'; spec: import('../research/studio').ChartSpec; size?: 'half' | 'full' }
+  | { id: string; kind: 'stat'; stat: 'responses' | 'completion' | 'mean' | 'share'; variable?: string; value?: string; label?: string };
 export interface AnalysisOptions {
   weighting?: { enabled?: boolean; targets?: WeightTarget[] };
+  dashboard?: DashboardItem[];
   /** Data-quality thresholds. */
   quality?: { speeder_ratio?: number; min_completion?: number };
 }
@@ -176,6 +181,8 @@ export interface PublicForm {
   /** Quota groups that are already full (v3). */
   full_quotas?: { field: string; value: string; message?: string | null }[];
   has_uploads?: boolean;
+  /** New responses are sent to the owner's webhook (v5). */
+  has_webhook?: boolean;
   fields: Omit<RhField, 'project_id' | 'field_order'>[];
 }
 
@@ -328,6 +335,8 @@ export interface SharedResults {
   year: string | null;
   status: FormStatus;
   include_text: boolean;
+  /** The owner's dashboard tiles (v5). */
+  dashboard?: DashboardItem[];
   /** The owner's weighting targets, when weighting is on (v4). */
   weighting?: AnalysisOptions['weighting'] | null;
   fields: RhField[];
@@ -529,4 +538,59 @@ export function parseInvitees(text: string): { people: { email: string; name: st
     }
   }
   return { people: [...people.values()], bad };
+}
+
+// ---------------------------------------------------------------------------
+// Connect: API keys (data link for other tools) and webhooks
+// ---------------------------------------------------------------------------
+export interface RhApiKey { id: string; project_id: string; name: string; prefix: string; created_at: string; last_used_at: string | null; revoked_at: string | null }
+export interface RhWebhook { project_id: string; url: string; secret: string; enabled: boolean; created_at: string; updated_at: string }
+export interface RhWebhookLog { id: string; response_id: string | null; event: string; status: number | null; error: string | null; attempts: number; delivered_at: string | null; created_at: string }
+
+export const connectKey = (id: string) => ['rh', 'connect', id] as const;
+
+/** Address of the rh-api Edge Function (the data link other tools read). */
+export function apiUrl(key: string, format: 'json' | 'csv' = 'json'): string {
+  const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';
+  return `${base}/functions/v1/rh-api?key=${encodeURIComponent(key)}${format === 'csv' ? '&format=csv' : ''}`;
+}
+
+export async function listApiKeys(projectId: string): Promise<RhApiKey[]> {
+  return must(await supabase.from('rh_api_keys').select('id,project_id,name,prefix,created_at,last_used_at,revoked_at')
+    .eq('project_id', projectId).order('created_at', { ascending: false })) as RhApiKey[];
+}
+/** Make a key. The full key is returned only this once; the database keeps just its hash. */
+export async function createApiKey(projectId: string, name: string): Promise<{ id: string; key: string }> {
+  return must(await supabase.rpc('rh_create_api_key', { p_project_id: projectId, p_name: name })) as { id: string; key: string };
+}
+export async function revokeApiKey(id: string): Promise<void> {
+  must(await supabase.rpc('rh_revoke_api_key', { p_key_id: id }));
+}
+
+export async function getWebhook(projectId: string): Promise<RhWebhook | null> {
+  const rows = must(await supabase.from('rh_webhooks').select('*').eq('project_id', projectId)) as RhWebhook[];
+  return rows[0] ?? null;
+}
+export async function saveWebhook(projectId: string, url: string, enabled: boolean): Promise<RhWebhook> {
+  return must(await supabase.from('rh_webhooks').upsert({ project_id: projectId, url, enabled, updated_at: new Date().toISOString() }, { onConflict: 'project_id' }).select('*').single()) as RhWebhook;
+}
+export async function deleteWebhook(projectId: string): Promise<void> {
+  must(await supabase.from('rh_webhooks').delete().eq('project_id', projectId));
+}
+export async function webhookLog(projectId: string): Promise<RhWebhookLog[]> {
+  return must(await supabase.from('rh_webhook_log').select('*').eq('project_id', projectId).order('created_at', { ascending: false }).limit(25)) as RhWebhookLog[];
+}
+async function rhApi<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('rh-api', { body });
+  if (error) {
+    const b = error instanceof FunctionsHttpError ? await (error.context as Response).json().catch(() => null) as { error?: string } | null : null;
+    throw new Error(b?.error ?? 'Could not reach ResearchHub’s connection service. Check your connection.');
+  }
+  return data as T;
+}
+export const testWebhook = (projectId: string) => rhApi<{ ok: boolean; status?: number; error?: string }>({ action: 'test', project_id: projectId });
+export const retryWebhook = (projectId: string) => rhApi<{ sent: number; failed: number; remaining: number }>({ action: 'retry', project_id: projectId });
+/** Respondent side: ask the server to send the webhook for a new response. Never throws. */
+export function pingWebhook(responseId: string): void {
+  void supabase.functions.invoke('rh-api', { body: { action: 'deliver', response_id: responseId } }).catch(() => undefined);
 }

@@ -11,6 +11,8 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
 import { unzipSync } from 'fflate';
 
 const APP = process.env.APP_URL ?? 'http://localhost:5173';
@@ -1000,6 +1002,97 @@ try {
   await page.getByTestId('rh-studio-cmd').fill('fitlm(Q1, Q3, Q4)');
   await page.getByTestId('rh-studio-cmd').press('Enter');
   check('Phase 3: regression from the command window', /Linear regression of Q4/.test(await page.getByTestId('rh-studio-log').textContent()));
+
+  // ---------------------------------------------------------------- ResearchHub Phase 4
+  // Dashboard, Word report, data link (API) and webhooks.
+  await page.getByTestId('rh-studio-cmd').fill('bar(Q1)');
+  await page.getByTestId('rh-studio-cmd').press('Enter');
+  await page.getByTestId('rh-studio-pin').click();
+  await page.getByText('Pinned to the dashboard').waitFor();
+  await page.getByRole('tab', { name: 'Dashboard' }).click();
+  await page.getByTestId('rh-dashboard').waitFor();
+  await page.getByTestId('rh-add-tile').click();
+  await page.getByLabel('Tile type').selectOption('share');
+  await page.getByLabel('Tile question').selectOption('Q1');
+  await page.getByLabel('Tile answer').selectOption('200');
+  await page.getByLabel('Tile title').fill('Level 200');
+  await page.getByTestId('rh-tile-add').click();
+  await page.getByTestId('rh-tile').first().waitFor();
+  check('Phase 4: a pinned chart and a headline number make the dashboard', (await page.getByTestId('rh-dashboard').locator('svg[data-testid="rh-studio-figure"]').count()) === 1
+    && /Level 200\s*70%/.test(await page.getByTestId('rh-tile').first().textContent()));
+  check('Phase 4: the dashboard is saved with the questionnaire', sql(`select jsonb_array_length(analysis->'dashboard') from rh_projects where id='${wbId}'`) === '2');
+  await shot(page, '37a-rh-dashboard');
+  const wbToken = sql(`update rh_projects set results_token = gen_random_uuid() where id='${wbId}' returning results_token`).split('\n')[0];
+  const supc = await browser.newContext();
+  const supp = await supc.newPage();
+  await supp.goto(`${APP}/r/${wbToken}`);
+  await supp.getByTestId('rh-dashboard').waitFor();
+  check('Phase 4: a supervisor opening the results link lands on the dashboard', /Level 200\s*70%/.test(await supp.getByTestId('rh-dashboard').textContent()) && !(await visible(supp.getByTestId('rh-add-tile'), 1000)));
+  await supc.close();
+
+  const [docDl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.getByTestId('rh-word-report').click()]);
+  const docx = unzipSync(fs.readFileSync(await docDl.path()));
+  const docXml = Buffer.from(docx['word/document.xml']).toString();
+  check('Phase 4: the Word report has the results, charts and a methods note',
+    docDl.suggestedFilename().endsWith('.docx') && /Results by question/.test(docXml) && /Methods note/.test(docXml) && /Which level are you in\?/.test(docXml)
+    && /set aside before analysis/.test(docXml) && /weighted to known population proportions/.test(docXml)
+    && Object.keys(docx).filter((n) => n.startsWith('word/media/')).length >= 3, `${Object.keys(docx).filter((n) => n.startsWith('word/media/')).length} images`);
+
+  // Data link
+  await page.getByRole('tab', { name: 'Connect' }).click();
+  await page.getByLabel('Key name').fill('Sheet for supervisor');
+  await page.getByTestId('rh-create-key').click();
+  await page.getByTestId('rh-key-value').waitFor();
+  const apiKey = await page.getByTestId('rh-key-value').inputValue();
+  check('Phase 4: the key is shown once and only its hash is stored', /^rh_[0-9a-f]{64}$/.test(apiKey) && sql(`select count(*) from rh_api_keys where key_hash = encode(sha256(convert_to('${apiKey}', 'UTF8')), 'hex')`) === '1'
+    && !sql(`select string_agg(prefix || key_hash, ',') from rh_api_keys`).includes(apiKey));
+  check('Phase 4: a ready-made Google Sheets formula is offered', /^=IMPORTDATA\(".*\/functions\/v1\/rh-api\?key=rh_[0-9a-f]{64}&format=csv"\)$/.test(await page.getByTestId('rh-sheets-formula').textContent()));
+  const apiJson = await (await fetch(`${STACK}/functions/v1/rh-api?key=${apiKey}`)).json();
+  const apiCsv = await (await fetch(`${STACK}/functions/v1/rh-api?key=${apiKey}&format=csv`)).text();
+  check('Phase 4: the data link returns the analysed responses as JSON and CSV',
+    apiJson.responses?.length === Number(sql(`select count(*) from rh_responses where project_id='${wbId}' and not excluded`)) && apiJson.questions?.[0]?.key === 'Q1'
+    && apiCsv.split('\r\n')[0].includes('Q1. Which level are you in?'), `${apiJson.responses?.length} responses`);
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Revoke' }).first().click();
+  await page.getByText('Key revoked').waitFor();
+  check('Phase 4: a revoked key stops working at once', (await fetch(`${STACK}/functions/v1/rh-api?key=${apiKey}`)).status === 401);
+
+  // Webhook: a little receiver stands in for Zapier
+  const hooks = [];
+  const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { hooks.push({ headers: req.headers, body: b }); res.end('ok'); }); });
+  await new Promise((r) => receiver.listen(5990, '127.0.0.1', r));
+  await page.getByTestId('rh-hook-url').fill('http://example.com/x');
+  check('Phase 4: webhook addresses must be https', await visible(page.getByText('The address must start with https://')));
+  await page.getByTestId('rh-hook-url').fill('https://hook.test/catch');
+  await page.getByTestId('rh-hook-save').click();
+  await page.getByTestId('rh-hook-state').waitFor();
+  await page.getByTestId('rh-hook-test').click();
+  await page.getByText(/Test sent/).waitFor();
+  const secret = sql(`select secret from rh_webhooks where project_id='${wbId}'`);
+  const ping = hooks.find((h) => h.headers['x-researchhub-event'] === 'ping');
+  check('Phase 4: the test ping arrives signed with the secret', !!ping && ping.headers['x-researchhub-signature'] === `sha256=${crypto.createHmac('sha256', secret).update(ping.body).digest('hex')}`);
+  const wc = await browser.newContext();
+  const wp = await wc.newPage();
+  await wp.goto(`${APP}/f/${wbId}`);
+  await wp.getByLabel('200').check();
+  await wp.getByRole('textbox', { name: /Hours of sleep/ }).fill('8');
+  await wp.getByRole('button', { name: 'Submit' }).click();
+  await wp.getByRole('heading', { name: 'Thank you!' }).waitFor();
+  await wc.close();
+  for (let k = 0; k < 40 && !hooks.some((h) => h.headers['x-researchhub-event'] === 'response.created'); k++) await sleep(250);
+  const created = hooks.find((h) => h.headers['x-researchhub-event'] === 'response.created');
+  const payload = created ? JSON.parse(created.body) : null;
+  check('Phase 4: a new response is sent to the webhook with its answers', payload?.event === 'response.created' && payload.response.answers.Q1 === '200' && payload.response.answers.Q2 === 8,
+    created?.body.slice(0, 160));
+  await page.getByRole('tab', { name: 'Summary' }).click();
+  await page.getByRole('tab', { name: 'Connect' }).click();
+  await page.getByTestId('rh-hook-log').waitFor();
+  check('Phase 4: deliveries are logged', /Delivered \(HTTP 200\)/.test(await page.getByTestId('rh-hook-log').textContent()));
+  await page.getByTestId('rh-hook-retry').click();
+  await page.getByText(/^\d+ sent|^Nothing waiting/).first().waitFor();
+  check('Phase 4: undelivered responses can be re-sent (older ones went out now)', hooks.filter((h) => h.headers['x-researchhub-event'] === 'response.created').length >= 2);
+  await shot(page, '37b-rh-connect');
+  receiver.close();
 
   // ---------------------------------------------------------------- Methods: PRISMA, search log, decisions, AI use
   await page.goto(`${APP}/p/${projectId}/methods`);

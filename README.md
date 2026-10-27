@@ -211,6 +211,24 @@ survey data for their project:
      MATLAB, SPSS or Stata. Results match R's `lm()` and `glm()` (checked in the unit tests).
      Also from the command window: `fitlm(Q2, Q3, Q5)` and `fitglm(Q2, Q3, Q4, 'Yes')`.
 
+10. **Phase 4: share and connect**
+   - *Dashboard* — pin any Chart studio chart (“Pin to dashboard”) and add headline numbers
+     (responses, completion, an average, the % giving an answer). It updates as responses
+     arrive, uses the same weights and set-asides as everything else, appears in the
+     printed report, and is the first thing a supervisor sees on the results link.
+   - *Word report* — one click makes a .docx with the AI summary, dashboard, a table and a
+     chart for every question, and a methods paragraph (collection dates, consent,
+     set-aside responses, weighting) to adapt for a thesis.
+   - *Data link (Connect tab)* — create an API key (only its hash is stored; it is shown
+     once) and read the analysed responses as JSON or CSV from the `rh-api` Edge Function,
+     e.g. `=IMPORTDATA("…/functions/v1/rh-api?key=…&format=csv")` in Google Sheets, Excel's
+     *From Web*, Power BI, R or Python. Revoke a key to cut access at once.
+   - *Webhooks* — each new response is POSTed as JSON to an https address (Zapier, Make,
+     n8n, your server), signed with `X-ResearchHub-Signature: sha256=<HMAC-SHA256 of the
+     body>`. Deliveries are logged; *Send a test* and *Send undelivered* are on the Connect
+     tab. `rh-api` is deployed with `verify_jwt = false` because every route checks its own
+     credential (API key, response id, or the owner's login).
+
 Security: questionnaires and answers are private to their owner (Row Level Security).
 Respondents can only load a published questionnaire and submit through a server function that
 checks every answer (required questions, number/email format, allowed options, scale 1–5),
