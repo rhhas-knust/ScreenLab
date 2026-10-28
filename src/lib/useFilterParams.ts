@@ -21,6 +21,7 @@ export function useFilterParams() {
     reason: params.get('reason') ?? '',
     kw: (params.get('kw') as RefFilters['kw']) || '',
     pico: (params.get('pico') as RefFilters['pico']) || '',
+    by: params.get('by') ?? '',
   }), [params]);
 
   const sort: RefSort = useMemo(() => ({
@@ -57,18 +58,19 @@ export function useFilterParams() {
     if ('reason' in f) patch.reason = f.reason ?? null;
     if ('kw' in f) patch.kw = f.kw || null;
     if ('pico' in f) patch.pico = f.pico || null;
+    if ('by' in f) patch.by = f.by || null;
     update(patch);
   }, [update]);
 
   const clearFilters = useCallback(() => {
-    update({ q: null, status: null, source: null, yf: null, yt: null, pt: null, lang: null, tags: null, dup: null, fts: null, reason: null, kw: null, pico: null });
+    update({ q: null, status: null, source: null, yf: null, yt: null, pt: null, lang: null, tags: null, dup: null, fts: null, reason: null, kw: null, pico: null, by: null });
   }, [update]);
 
   const setSort = useCallback((s: RefSort) => update({ sort: s.key === 'seq' ? null : s.key, dir: s.dir === 'asc' ? null : 'desc' }), [update]);
 
   const activeFilterCount = [
     filters.status !== 'all', filters.source, filters.yearFrom, filters.yearTo, filters.pubType, filters.language,
-    filters.tags.length, filters.dup !== 'active', filters.ftStatus, filters.reason, filters.kw, filters.pico,
+    filters.tags.length, filters.dup !== 'active', filters.ftStatus, filters.reason, filters.kw, filters.pico, filters.by,
   ].filter(Boolean).length;
 
   return { filters, sort, stage, refId, update, setFilters, clearFilters, setSort, activeFilterCount };

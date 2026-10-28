@@ -361,7 +361,12 @@ function cond(col, expr, params) {
     }
     case 'cs': {
       const list = splitTop(raw.replace(/^\{|\}$/g, '')).map(unquote);
-      sql = `${c} @> ${add(list)}::text[]`;
+      sql = `${c}::text[] @> ${add(list)}::text[]`;
+      break;
+    }
+    case 'ov': {
+      const list = splitTop(raw.replace(/^\{|\}$/g, '')).map(unquote);
+      sql = `${c}::text[] && ${add(list)}::text[]`;
       break;
     }
     default: throw Object.assign(new Error(`operator not supported by test stack: ${op}`), { code: 'PGRST100' });

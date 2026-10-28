@@ -86,6 +86,9 @@ export interface Reference extends BibRecord {
   tag_names: string[];
   full_text_url: string | null;
   full_text_status: FullTextStatus;
+  /** Who has screened it at each stage (user ids, oldest first). */
+  title_abstract_reviewers?: string[];
+  full_text_reviewers?: string[];
   duplicate_status: DuplicateStatus;
   duplicate_group_id: string | null;
   merged_into_id: string | null;
@@ -99,7 +102,7 @@ export type ReferenceListItem = Pick<
   | 'id' | 'seq' | 'title' | 'authors' | 'year' | 'journal' | 'database_source'
   | 'title_abstract_decision' | 'title_abstract_exclusion_reason' | 'title_abstract_screened_at'
   | 'full_text_decision' | 'full_text_exclusion_reason' | 'full_text_screened_at'
-  | 'duplicate_status' | 'tag_names' | 'full_text_status'
+  | 'duplicate_status' | 'tag_names' | 'full_text_status' | 'title_abstract_reviewers' | 'full_text_reviewers'
 >;
 
 export interface ExclusionReason {

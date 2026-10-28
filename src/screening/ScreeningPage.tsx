@@ -30,6 +30,9 @@ import { NotesEditor } from './NotesEditor';
 import { TagEditor } from './TagEditor';
 import { FullTextPanel } from './FullTextPanel';
 import { HistoryPanel } from './HistoryPanel';
+import { ReviewedByFilter, ReviewerChips, ReviewerDecisions, people } from './Reviewers';
+import { listTeam, xk } from '../lib/api/extraction';
+import { useAuth } from '../auth/AuthProvider';
 import { ShortcutsHelp } from './ShortcutsHelp';
 
 const PAGE_SIZE = 50;
@@ -78,7 +81,16 @@ export function ScreeningPage() {
   const { filters: urlFilters, sort, stage: stageParam, refId, update, setFilters, clearFilters, setSort, activeFilterCount } = useFilterParams();
   const criteria = useCriteriaTerms(projectId);
   // The criteria keywords feed the keyword filter; they are not stored in the URL.
-  const filters = useMemo(() => ({ ...urlFilters, terms: criteria }), [urlFilters, criteria]);
+  const { user } = useAuth();
+  const me = user?.id;
+  const teamQuery = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
+  const team = useMemo(() => teamQuery.data ?? [], [teamQuery.data]);
+  // The "Screened by" filter needs the team, so the first article waits for it.
+  const teamReady = !teamQuery.isPending;
+  const partners = useMemo(() => team.filter((t) => t.user_id !== me).map((t) => t.user_id), [team, me]);
+  const reviewerMap = useMemo(() => people(team, me), [team, me]);
+  const hasTeam = partners.length > 0;
+  const filters = useMemo(() => ({ ...urlFilters, terms: criteria, me, partners }), [urlFilters, criteria, me, partners]);
   const stage: Stage = settings && !settings.stage2_enabled ? 'title_abstract' : stageParam;
   // Each panel is rendered exactly once: in the side columns on wide screens,
   // in the drawer / below the article / bottom bar on narrow ones.
@@ -216,9 +228,10 @@ export function ScreeningPage() {
   /**
    * Review mode: when the status filter targets already-screened articles
    * (e.g. "Maybe"), step through that filtered list in order instead of
-   * looking for unscreened articles.
+   * looking for unscreened articles. The same applies to "Screened by", which
+   * mostly lists papers that already have a decision.
    */
-  const reviewMode = filters.status !== 'all' && filters.status !== 'unscreened';
+  const reviewMode = (filters.status !== 'all' && filters.status !== 'unscreened') || !!filters.by;
   // Prefetched "next in view" so advancing is instant and works offline.
   const nextInView = useRef<{ afterId: string; key: string; ref: Reference | null } | null>(null);
   const advanceInView = useCallback(async (after: Reference | null) => {
@@ -276,7 +289,7 @@ export function ScreeningPage() {
   // Keyed on filterKey so a repeated effect run (React StrictMode) is a no-op.
   const handledKey = useRef<string | null>(null);
   useEffect(() => {
-    if (handledKey.current === filterKey) return;
+    if (!teamReady || handledKey.current === filterKey) return;
     const first = handledKey.current === null;
     handledKey.current = filterKey;
     queueRef.current = [];
@@ -284,7 +297,7 @@ export function ScreeningPage() {
     if (first && refId) void openById(refId);
     else void advance(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey]);
+  }, [filterKey, teamReady]);
 
   useEffect(() => setSearchText(filters.q), [filters.q]);
   useEffect(() => {
@@ -549,6 +562,7 @@ export function ScreeningPage() {
           </Button>
           <SortControl sort={sort} setSort={setSort} id="screen-sort" />
         </div>
+        {(hasTeam || filters.by) && <ReviewedByFilter value={filters.by} onChange={(by) => setFilters({ by })} team={team} me={me} />}
         {filtersOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
             <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" criteriaReady={hasTerms(criteria)} picoReady={hasPico(criteria)} />
@@ -601,6 +615,8 @@ export function ScreeningPage() {
               const o = outbox.overlay(row as Reference);
               const d = decisionOf(o, stage);
               const active = current?.id === row.id;
+              const byIds = (stage === 'title_abstract' ? row.title_abstract_reviewers : row.full_text_reviewers) ?? [];
+              const screenedBy = me && d && decidedRef.current.has(key(row.id)) && !byIds.includes(me) ? [...byIds, me] : byIds;
               return (
                 <li key={row.id} className={cx(selectMode && 'flex items-start')}>
                   {selectMode && (
@@ -618,6 +634,7 @@ export function ScreeningPage() {
                         {row.duplicate_status === 'possible' && ' · ⚠ possible duplicate'}
                       </span>
                     </span>
+                    {hasTeam && <ReviewerChips ids={screenedBy} map={reviewerMap} />}
                   </button>
                 </li>
               );
@@ -646,6 +663,7 @@ export function ScreeningPage() {
 
   const detailPanels = current && (
     <div className="space-y-5">
+      {hasTeam && <ReviewerDecisions referenceId={current.id} stage={stage} team={team} me={me} version={`${historyVersion}:${curDecision}:${curReason}`} />}
       <AiPanel reference={current} stage={stage} projectId={projectId} onAccept={(d, r) => decide(d, r)} />
       <PicoCheck reference={current} terms={criteria} projectId={projectId} />
       <KeywordCheck reference={current} terms={criteria} projectId={projectId} />
@@ -719,7 +737,7 @@ export function ScreeningPage() {
             <p className="mt-2 text-sm text-slate-600">
               {total === 0 && stage === 'title_abstract' && !activeFilterCount && !filters.q
                 ? 'Import references to start screening.'
-                : reviewMode ? 'There are no more articles matching the current status filter and search.' : `There are no unscreened articles${activeFilterCount || filters.q ? ' matching the current search and filters' : ` at the ${stage === 'title_abstract' ? 'title/abstract' : 'full-text'} stage`}.`}
+                : reviewMode ? 'There are no more articles matching the current filters and search.' : `There are no unscreened articles${activeFilterCount || filters.q ? ' matching the current search and filters' : ` at the ${stage === 'title_abstract' ? 'title/abstract' : 'full-text'} stage`}.`}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {total === 0 && stage === 'title_abstract' && <Button variant="primary" onClick={() => nav(`/p/${projectId}/import`)}>Import references</Button>}

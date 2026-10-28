@@ -39,6 +39,14 @@ async function waitSaved(page, timeout = 15000) {
 }
 const currentRef = (page) => new URL(page.url()).searchParams.get('ref');
 const visible = (loc, timeout = 8000) => loc.first().waitFor({ timeout }).then(() => true, () => false);
+async function waitFor(fn, timeout = 15000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
 async function currentTitle(page) {
   return (await page.locator('#article-title').textContent())?.trim();
 }
@@ -1240,7 +1248,31 @@ try {
     await pco.getByTestId('extraction-title').waitFor();
     await pco.getByTestId('rob-form').or(pco.getByTestId('extraction-form')).first().waitFor();
     check('Risk of bias: a co-reviewer never sees the AI draft, so their appraisal stays independent', (await pco.getByTestId('ai-draft-rob').count()) === 0);
+    // Co-reviewer screens one paper; the owner can then find it.
+    // (Re-open a "maybe" paper so the co-reviewer screens it afresh; the final decision ends up the same.)
+    const partnerRef = sql(`select id from study_references where project_id='${projectId}' and title_abstract_decision = 'maybe' and duplicate_status not in ('duplicate','merged') order by seq limit 1`);
+    sql(`delete from reviewer_decisions where reference_id='${partnerRef}'; update study_references set title_abstract_decision=null where id='${partnerRef}'`);
+    await pco.goto(`${APP}/p/${projectId}/screening?ref=${partnerRef}`);
+    await pco.getByTestId('reviewer-decisions').waitFor();
+    await pco.getByTestId('decide-maybe').first().click();
+    check('Screening: the co-reviewer’s decision records who screened the paper',
+      await waitFor(() => sql(`select array_length(title_abstract_reviewers, 1) from study_references where id='${partnerRef}'`) === '1'));
     await ctxCo.close();
+    const robUrl = page.url();
+    await page.goto(`${APP}/p/${projectId}/screening?by=partner&ref=${partnerRef}`);
+    await page.getByTestId('screened-by').waitFor();
+    await page.getByRole('list', { name: 'Articles' }).waitFor();
+    const partnerRows = page.getByRole('list', { name: 'Articles' }).getByRole('listitem');
+    check('Screening: "Screened by" filter lists only the papers a co-reviewer has screened',
+      await partnerRows.count() === 1 && /Screened by e2e-b/.test(await partnerRows.first().getByTestId('reviewer-chips').getAttribute('aria-label')));
+    await page.getByTestId('reviewer-decisions').getByText(/Maybe/).waitFor();
+    check('Screening: the paper shows each co-reviewer’s own decision and who has not screened it yet',
+      /e2e-b/.test(await page.getByTestId('reviewer-decisions').textContent()) && /Not yet screened by you/.test(await page.getByTestId('reviewer-decisions').textContent()));
+    await page.getByTestId('screened-by').selectOption('partner_not_me');
+    check('Screening: "co-reviewer, not yet me" keeps the filter in the link', /by=partner_not_me/.test(page.url()));
+    await shot(page, '39b-screened-by');
+    await page.goto(robUrl);
+    await page.getByRole('combobox', { name: /^Q1\./ }).waitFor();
   }
   await page.getByRole('combobox', { name: /^Q1\./ }).selectOption('Yes');
   await page.getByRole('combobox', { name: /^Q7\./ }).selectOption('Unclear');

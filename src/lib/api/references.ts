@@ -23,8 +23,13 @@ export interface RefFilters {
   kw: '' | 'inc' | 'exc' | 'exc_only' | 'no_inc';
   /** PICO filter: all elements found / at least one missing / none found / a specific element missing. */
   pico: PicoFilter;
+  /** Who screened it at this stage: '' anyone, 'me', 'partner', 'partner_not_me', 'not_me', or a reviewer's user id. */
+  by: string;
   /** The project's criteria keywords (not stored in the URL; supplied by the page). */
   terms?: CriteriaTerms;
+  /** The signed-in user and their co-reviewers (supplied by the page; needed for `by`). */
+  me?: string;
+  partners?: string[];
 }
 
 export type PicoFilter = '' | 'all' | 'miss_any' | 'none' | `miss_${PicoKey}`;
@@ -52,7 +57,7 @@ export interface RefSort {
 
 export const DEFAULT_FILTERS: RefFilters = {
   q: '', status: 'all', source: '', yearFrom: '', yearTo: '', pubType: '', language: '', tags: [],
-  dup: 'active', ftStatus: '', reason: '', kw: '', pico: '',
+  dup: 'active', ftStatus: '', reason: '', kw: '', pico: '', by: '',
 };
 export const DEFAULT_SORT: RefSort = { key: 'seq', dir: 'asc' };
 
@@ -63,13 +68,17 @@ export const SORT_LABELS: Record<SortKey, string> = {
 
 export const LIST_COLUMNS =
   'id,seq,title,authors,year,journal,database_source,title_abstract_decision,title_abstract_exclusion_reason,' +
-  'title_abstract_screened_at,full_text_decision,full_text_exclusion_reason,full_text_screened_at,duplicate_status,tag_names,full_text_status';
+  'title_abstract_screened_at,full_text_decision,full_text_exclusion_reason,full_text_screened_at,duplicate_status,tag_names,full_text_status,' +
+  'title_abstract_reviewers,full_text_reviewers';
 
 export function decisionColumn(stage: Stage) {
   return stage === 'title_abstract' ? 'title_abstract_decision' : 'full_text_decision';
 }
 export function reasonColumn(stage: Stage) {
   return stage === 'title_abstract' ? 'title_abstract_exclusion_reason' : 'full_text_exclusion_reason';
+}
+export function reviewersColumn(stage: Stage) {
+  return stage === 'title_abstract' ? 'title_abstract_reviewers' : 'full_text_reviewers';
 }
 export function screenedAtColumn(stage: Stage) {
   return stage === 'title_abstract' ? 'title_abstract_screened_at' : 'full_text_screened_at';
@@ -130,7 +139,21 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.reason) qb = qb.eq(reasonColumn(stage), f.reason);
   if (f.kw && f.terms) qb = applyKeywordFilter(qb, f.kw, f.terms);
   if (f.pico && f.terms) qb = applyPicoFilter(qb, f.pico, f.terms);
+  if (f.by && f.me) qb = applyReviewerFilter(qb, reviewersColumn(stage), f.by, f.me, f.partners ?? []);
   return qb;
+}
+
+const NO_ONE = '00000000-0000-0000-0000-000000000000';
+
+function applyReviewerFilter(qb: Query, col: string, by: string, me: string, partners: string[]): Query {
+  const others = partners.length ? partners : [NO_ONE];
+  switch (by) {
+    case 'me': return qb.contains(col, [me]);
+    case 'not_me': return qb.not(col, 'cs', `{${me}}`);
+    case 'partner': return qb.overlaps(col, others);
+    case 'partner_not_me': return qb.overlaps(col, others).not(col, 'cs', `{${me}}`);
+    default: return /^[0-9a-f-]{36}$/i.test(by) ? qb.contains(col, [by]) : qb;
+  }
 }
 
 /**
