@@ -1187,7 +1187,16 @@ try {
   await page.getByTestId('agreement').waitFor();
   const [t1Dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('table1-download').click()]);
   check('Extraction: characteristics table downloads with the final answers', /Tier 1/.test(fs.readFileSync(await t1Dl.path(), 'utf8')) && /GPT-4o \(May 2024\)/.test(fs.readFileSync(await t1Dl.path(), 'utf8')));
-  check('Extraction: table lists only studies with an agreed extraction by default', fs.readFileSync(await t1Dl.path(), 'utf8').trim().split('\n').length === 2);
+  const t1Rows = fs.readFileSync(await t1Dl.path(), 'utf8').replace(/^\ufeff/, '').trim().split(/\r?\n/);
+  check('Extraction: CSV lays fields down the side, one column per study, like the PDF', /^Field,/.test(t1Rows[0]) && t1Rows.some((r) => /^Tier,Tier 1/.test(r)));
+  check('Extraction: table lists only studies with an agreed extraction by default', (t1Rows[0].match(/\(#\d+\)/g) ?? []).length === 1, t1Rows[0]);
+  await page.getByTestId('csv-layout').selectOption('studies');
+  const [t1Flat] = await Promise.all([page.waitForEvent('download'), page.getByTestId('table1-download').click()]);
+  check('Extraction: one-study-per-row layout is still available for analysis', fs.readFileSync(await t1Flat.path(), 'utf8').replace(/^\ufeff/, '').trim().split(/\r?\n/).length === 2);
+  await page.getByTestId('csv-layout').selectOption('fields');
+  const [allDl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Every reviewer/ }).click()]);
+  const allCsv = fs.readFileSync(await allDl.path(), 'utf8');
+  check('Extraction: every reviewer’s answers download in study blocks, like the PDF', /^\ufeff?.+\(#\d+\)/.test(allCsv) && /Field,[^\n]+,Agreed final,Differs/.test(allCsv), allCsv.slice(0, 200));
   await page.getByTestId('pilot-report-link').click();
   await page.getByTestId('pilot-report').waitFor();
   check('Pilot report: lists each piloted study with the reviewers and agreed answers', (await page.getByTestId('pilot-study').count()) === 1 && /GPT-4o \(May 2024\)/.test(await page.getByTestId('pilot-report').textContent()));

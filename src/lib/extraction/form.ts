@@ -263,6 +263,21 @@ export function characteristicsCsv(form: ExtractionForm, rows: { study: StudyRow
   ]);
 }
 
+/**
+ * The characteristics table turned on its side, as in the PDF report: one row
+ * per field, one column per study. Easier to read and print; the one-row-per-
+ * study layout above is the one to use for analysis.
+ */
+export function characteristicsByFieldCsv(form: ExtractionForm, rows: { study: StudyRow; data: ExtractionData | null }[]): string {
+  return '\ufeff' + Papa.unparse([
+    ['Field', ...rows.map(({ study: s }) => `${studyLabel(s.authors, s.year)} (#${s.seq})`)],
+    ['Title', ...rows.map(({ study: s }) => s.title ?? '')],
+    ['Journal', ...rows.map(({ study: s }) => s.journal ?? '')],
+    ['DOI', ...rows.map(({ study: s }) => s.doi ?? '')],
+    ...form.fields.map((x) => [x.label, ...rows.map(({ data }) => (data ? display(data[x.key]) : ''))]),
+  ]);
+}
+
 /** Every reviewer's extraction, for the audit trail / appendix. */
 export function allExtractionsCsv(form: ExtractionForm, rows: { seq: number; reviewer: string; status: string; data: ExtractionData }[]): string {
   return '﻿' + Papa.unparse([

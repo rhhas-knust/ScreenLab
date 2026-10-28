@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import Papa from 'papaparse';
 import {
-  agreement, characteristicsCsv, cohensKappa, fillEmpty, mergeForFinal, newKey, PRESETS, readAiDraft, readForm, sameValue, studyLabel, tierCounts,
+  agreement, characteristicsByFieldCsv, characteristicsCsv, cohensKappa, fillEmpty, mergeForFinal, newKey, PRESETS, readAiDraft, readForm, sameValue, studyLabel, tierCounts,
   type ExtractionForm,
 } from '../../src/lib/extraction/form';
+import { buildPilot, pilotCsv } from '../../src/lib/extraction/pilot';
 
 const form: ExtractionForm = {
   fields: [
@@ -63,6 +64,31 @@ describe('extraction form', () => {
     expect(rows[0]).toEqual(['ID', 'Study', 'Title', 'Journal', 'DOI', 'Tier', 'Factors', 'Sample size', 'Findings']);
     expect(rows[1].slice(0, 7)).toEqual(['#80', 'Smith et al., 2024', 'Disparities', 'JAMIA', '10.1/x', 'Tier 2', 'Race; Language']);
     expect(rows[2][1]).toBe('Lee, 2025');
+  });
+
+  it('can lay the characteristics table out with fields down the side, like the PDF', () => {
+    const csv = characteristicsByFieldCsv(form, [
+      { study: { seq: 80, title: 'Disparities', authors: 'Smith, J.; Doe, A.', year: 2024, journal: 'JAMIA', doi: '10.1/x' }, data: { tier: 'Tier 2', factors: ['Race', 'Language'] } },
+      { study: { seq: 9, title: 'Other', authors: 'Lee K', year: 2025, journal: null, doi: null }, data: null },
+    ]);
+    const rows = Papa.parse<string[]>(csv.replace(/^\ufeff/, '')).data;
+    expect(rows.map((r) => r[0])).toEqual(['Field', 'Title', 'Journal', 'DOI', 'Tier', 'Factors', 'Sample size', 'Findings']);
+    expect(rows[0]).toEqual(['Field', 'Smith et al., 2024 (#80)', 'Lee, 2025 (#9)']);
+    expect(rows[4]).toEqual(['Tier', 'Tier 2', '']);
+    expect(rows[5]).toEqual(['Factors', 'Race; Language', '']);
+  });
+
+  it('lays every reviewer’s answers out in study blocks, like the PDF report', () => {
+    const pilot = buildPilot(form, [{
+      seq: 3, label: 'Smith et al., 2024', title: 'Disparities', final: { tier: 'Tier 1' },
+      entries: [{ reviewer: 'kofi@x.org', data: { tier: 'Tier 1', n: '50' } }, { reviewer: 'nana@x.org', data: { tier: 'Tier 2', n: '50' } }],
+    }]);
+    const rows = Papa.parse<string[]>(pilotCsv(pilot).replace(/^\ufeff/, '')).data;
+    expect(rows[0]).toEqual(['Smith et al., 2024 (#3)', 'Disparities']);
+    expect(rows[1]).toEqual(['1 field differs', 'final extraction agreed']);
+    expect(rows[2]).toEqual(['Field', 'kofi@x.org', 'nana@x.org', 'Agreed final', 'Differs']);
+    expect(rows[3]).toEqual(['Tier', 'Tier 1', 'Tier 2', 'Tier 1', 'Yes']);
+    expect(rows[5]).toEqual(['Sample size', '50', '50', '', '']);
   });
 
   it('reads a stored form safely and makes unique keys', () => {

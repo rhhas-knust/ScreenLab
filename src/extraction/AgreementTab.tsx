@@ -3,10 +3,11 @@ import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { getAll, listTeam, studyDetails, xk, type ProgressRow } from '../lib/api/extraction';
 import {
-  agreement, allExtractionsCsv, characteristicsCsv, MODULES, optionCounts, OVERALL_KEY, tierCounts, type ExtractionData, type ExtractionForm, type ModuleKind,
+  agreement, allExtractionsCsv, characteristicsByFieldCsv, characteristicsCsv, MODULES, optionCounts, OVERALL_KEY, studyLabel, tierCounts, type ExtractionData, type ExtractionForm, type ModuleKind,
 } from '../lib/extraction/form';
+import { buildPilot, pilotCsv } from '../lib/extraction/pilot';
 import { downloadText, safeFileName } from '../lib/export/formats';
-import { Button, Card, EmptyState, Spinner, Stat } from '../components/ui';
+import { Button, Card, EmptyState, Select, Spinner, Stat } from '../components/ui';
 
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '–');
 
@@ -15,6 +16,9 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
   const all = useQuery({ queryKey: xk.all(projectId, kind), queryFn: () => getAll(projectId, kind) });
   const team = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
   const [agreedOnly, setAgreedOnly] = useState(true);
+  // 'fields': fields down the side, like the PDF report (default). 'studies': one study per row, for analysis.
+  const [layout, setLayout] = useState<'fields' | 'studies'>(() => { try { return localStorage.getItem('sl-csv-layout') === 'studies' ? 'studies' : 'fields'; } catch { return 'fields'; } });
+  const chooseLayout = (l: 'fields' | 'studies') => { setLayout(l); try { localStorage.setItem('sl-csv-layout', l); } catch { /* private mode */ } };
   if (!all.data) return <div className="p-6"><Spinner /></div>;
 
   const byRef = new Map<string, ExtractionData[]>();
@@ -32,14 +36,29 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
     const chosen = agreedOnly ? progress.filter((p) => finals.has(p.reference_id)) : progress;
     const details = new Map((await studyDetails(chosen.map((p) => p.reference_id))).map((d) => [d.id, d]));
     const rows = chosen.map((p) => ({ study: details.get(p.reference_id)!, data: finals.get(p.reference_id) ?? null })).filter((r) => r.study);
-    downloadText(kind === 'rob' ? `${base}_risk_of_bias.csv` : `${base}_characteristics_of_included_studies.csv`, characteristicsCsv(form, rows), 'text/csv');
+    downloadText(kind === 'rob' ? `${base}_risk_of_bias.csv` : `${base}_characteristics_of_included_studies.csv`,
+      layout === 'fields' ? characteristicsByFieldCsv(form, rows) : characteristicsCsv(form, rows), 'text/csv');
   };
-  const downloadAll = () => {
+  const downloadAll = async () => {
     const seq = new Map(progress.map((p) => [p.reference_id, p.seq]));
     const email = (id: string) => team.data?.find((t) => t.user_id === id)?.email ?? id;
-    downloadText(`${base}_all_${kind === 'rob' ? 'appraisals' : 'extractions'}.csv`, allExtractionsCsv(form, all.data!.extractions
-      .filter((e) => seq.has(e.reference_id))
-      .map((e) => ({ seq: seq.get(e.reference_id)!, reviewer: email(e.reviewer_id), status: e.status, data: e.data }))), 'text/csv');
+    const file = `${base}_all_${kind === 'rob' ? 'appraisals' : 'extractions'}.csv`;
+    const mine = all.data!.extractions.filter((e) => seq.has(e.reference_id));
+    if (layout === 'studies') {
+      downloadText(file, allExtractionsCsv(form, mine.map((e) => ({ seq: seq.get(e.reference_id)!, reviewer: email(e.reviewer_id), status: e.status, data: e.data }))), 'text/csv');
+      return;
+    }
+    // Same blocks as the PDF report: each study, fields down the side, a column per reviewer.
+    const ids = [...new Set(mine.map((e) => e.reference_id))];
+    const details = new Map((await studyDetails(ids)).map((d) => [d.id, d]));
+    const pilot = buildPilot(form, ids.filter((id) => details.has(id)).map((id) => {
+      const d = details.get(id)!;
+      return {
+        seq: d.seq, label: studyLabel(d.authors, d.year), title: d.title, final: finals.get(id) ?? null,
+        entries: mine.filter((e) => e.reference_id === id).map((e) => ({ reviewer: `${email(e.reviewer_id)}${e.status === 'complete' ? '' : ' (in progress)'}`, data: e.data })),
+      };
+    }));
+    downloadText(file, pilotCsv(pilot, M.noun), 'text/csv');
   };
 
   return (
@@ -89,6 +108,13 @@ export function AgreementTab({ kind = 'extraction', projectId, title, form, prog
           <Button variant="secondary" onClick={downloadAll}>Every reviewer’s {M.noun} (CSV)</Button>
           <Link to={`/p/${projectId}/pilot-report${kind === 'rob' ? '?kind=rob' : ''}`} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink-900 hover:bg-slate-50" data-testid="pilot-report-link">Pilot report</Link>
         </div>
+        <label className="flex flex-wrap items-center gap-2 text-sm">
+          CSV layout:
+          <Select aria-label="CSV layout" className="h-8 w-auto py-0.5" value={layout} onChange={(e) => chooseLayout(e.target.value as 'fields' | 'studies')} data-testid="csv-layout">
+            <option value="fields">Fields down the side, studies across (like the PDF)</option>
+            <option value="studies">One study per row (for Excel analysis, R, meta-analysis)</option>
+          </Select>
+        </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={agreedOnly} onChange={(e) => setAgreedOnly(e.target.checked)} data-testid="agreed-only" />
           Only studies with an agreed {M.noun} ({agreedCount} of {progress.length})

@@ -38,6 +38,16 @@
 }
 
 html, body, #root { height: 100%; }
+
+/* A scrolling panel must hold the absolutely positioned bits inside it (e.g.
+   screen-reader-only labels on each list row). Otherwise they are placed
+   against the page and stretch it far below the app, so scrolling shows a
+   blank area. In the base layer so fixed/sticky/absolute utilities still win. */
+@layer base {
+  :where(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll, .overflow-y-scroll, .overflow-hidden, .overflow-y-hidden, .overflow-x-hidden) {
+    position: relative;
+  }
+}
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
   font-family: var(--font-sans);
