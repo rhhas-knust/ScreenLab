@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { unzipSync } from 'fflate';
+import { unzipSync, zipSync, strToU8 } from 'fflate';
 
 const APP = process.env.APP_URL ?? 'http://localhost:5173';
 const STACK = 'http://localhost:54321';
@@ -1329,6 +1329,41 @@ try {
   await page.getByText('Checklist saved').first().waitFor();
   check('PRISMA 2020 checklist: locations saved', sql(`select settings->'prisma2020'->>'1' from project_settings where project_id='${projectId}'`) === 'Title page');
   await shot(page, '41-prisma2020');
+
+  // ---------------------------------------------------------------- Import extractions from Excel
+  {
+    const other = sql(`update study_references set title_abstract_decision='include', full_text_decision='include' where id=(select id from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') and seq<>${exSeq} and full_text_decision is distinct from 'include' order by seq limit 1) returning seq`).split('\n')[0].trim();
+    const otherTitle = sql(`select title from study_references where project_id='${projectId}' and seq=${other}`);
+    const exDoi = sql(`select coalesce(doi,'') from study_references where project_id='${projectId}' and seq=${exSeq}`);
+    const x = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const sheetRows = [
+      ['Study', 'Title', 'DOI', 'Tier', 'LLMs tested', 'Disparity factor(s)', 'Funding source'],
+      ['Other study', otherTitle, '', 'tier 2', 'Claude 3', 'Race/ethnicity; Skin tone', 'NIH'],
+      [`#${exSeq}`, '', exDoi, 'Tier 2', 'GPT-4', '', 'Wellcome'],
+      ['Nobody 1999', 'A paper that is not in this project at all', '', 'Tier 1', '', '', ''],
+    ];
+    const sheetXml = `<worksheet><sheetData>${sheetRows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => (v ? `<c r="${String.fromCharCode(65 + ci)}${ri + 1}" t="inlineStr"><is><t>${x(v)}</t></is></c>` : '')).join('')}</row>`).join('')}</sheetData></worksheet>`;
+    const book = zipSync({
+      'xl/workbook.xml': strToU8('<workbook xmlns:r="r"><sheets><sheet name="My extraction" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+      'xl/_rels/workbook.xml.rels': strToU8('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+      'xl/worksheets/sheet1.xml': strToU8(sheetXml),
+    });
+    await page.goto(`${APP}/p/${projectId}/extraction?tab=import`);
+    await page.getByTestId('import-file').setInputFiles({ name: 'extraction.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(book) });
+    await page.getByTestId('import-summary').waitFor();
+    check('Import: reads an Excel file and matches studies by title and DOI, leaving out one it cannot find',
+      /2 of 3 studies ready/.test(await page.getByTestId('import-summary').textContent()) && /No matching paper found/.test(await page.getByTestId('import-row').nth(2).textContent()),
+      await page.getByTestId('import-summary').textContent());
+    check('Import: a column not in the form is offered as a new field', await page.getByTestId('import-map-6').inputValue() === 'new');
+    await page.getByTestId('import-target').selectOption('draft');
+    await page.getByTestId('import-go').click();
+    await page.getByTestId('import-done').waitFor();
+    const got = (seq) => sql(`select e.status || '|' || coalesce(e.data->>'tier','') || '|' || coalesce(e.data->>'llms','') || '|' || coalesce(e.data->>'funding_source','') || '|' || coalesce(e.data->'factors'->>1,'') from extractions e join study_references r on r.id=e.reference_id where r.project_id='${projectId}' and r.seq=${seq} and e.kind='extraction' and e.reviewer_id=(select owner_id from projects where id='${projectId}')`);
+    check('Import: answers saved as the importer’s own draft, fitted to the form’s options', got(other) === 'draft|Tier 2|Claude 3|NIH|Skin tone', got(other));
+    check('Import: existing answers are kept and only empty fields are filled', got(exSeq) === 'complete|Tier 1|GPT-4o (May 2024)|Wellcome|', got(exSeq));
+    check('Import: the new column is added to the extraction form', sql(`select count(*) from project_settings, jsonb_array_elements(settings->'extraction_form'->'fields') f where project_id='${projectId}' and f->>'label'='Funding source'`) === '1');
+    await shot(page, '43-import-extractions');
+  }
 
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);

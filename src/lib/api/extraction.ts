@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { must } from '../errors';
 import { saveSettingsKey } from './methods';
 import { MODULES, type ExtractionData, type ExtractionForm, type ModuleKind } from '../extraction/form';
+import type { PoolRef } from '../extraction/importSheet';
 
 export interface TeamMember { user_id: string; email: string; role: 'owner' | 'reviewer' | 'viewer'; added_at: string }
 export interface ProgressRow {
@@ -83,4 +84,15 @@ export async function studyDetails(ids: string[]) {
       .in('id', ids.slice(i, i + 200))) as typeof out));
   }
   return out;
+}
+
+/** Every active paper in the project with what is needed to match an imported row to it. */
+export async function importPool(projectId: string, included: Set<string>): Promise<PoolRef[]> {
+  const out: PoolRef[] = [];
+  for (let from = 0; ; from += 1000) {
+    const rows = must(await supabase.from('study_references').select('id,seq,title,authors,year,doi,pmid')
+      .eq('project_id', projectId).not('duplicate_status', 'in', '(duplicate,merged)').order('seq').range(from, from + 999)) as Omit<PoolRef, 'included'>[];
+    out.push(...rows.map((r) => ({ ...r, included: included.has(r.id) })));
+    if (rows.length < 1000) return out;
+  }
 }

@@ -8,12 +8,14 @@ import { cx, EmptyState, PageLoader, Stat } from '../components/ui';
 import { FormEditor } from '../extraction/FormEditor';
 import { AgreementTab } from '../extraction/AgreementTab';
 import { RobPlotTab } from '../extraction/RobPlot';
+import { ImportTab } from '../extraction/ImportTab';
 
-const TABS: { key: 'studies' | 'form' | 'agreement' | 'plot'; label: string; only?: ModuleKind }[] = [
+const TABS: { key: 'studies' | 'form' | 'agreement' | 'plot' | 'import'; label: string; only?: ModuleKind }[] = [
   { key: 'studies', label: 'Studies' },
   { key: 'form', label: 'Form' },
   { key: 'agreement', label: 'Agreement & export' },
   { key: 'plot', label: 'Traffic-light plot', only: 'rob' },
+  { key: 'import', label: 'Import' },
 ];
 const INTRO: Record<ModuleKind, string> = {
   extraction: 'Each reviewer extracts every included study on their own; answers stay hidden from the other reviewer until both are complete. Then you compare, agree the final version, and export the characteristics table.',
@@ -66,7 +68,8 @@ export function ExtractionPage({ kind = 'extraction' }: { kind?: ModuleKind }) {
       {tab === 'form' && <FormEditor kind={kind} key={JSON.stringify(form)} projectId={projectId} form={form} started={rows.some((r) => r.started_count > 0)} />}
       {tab === 'agreement' && form && <AgreementTab kind={kind} projectId={projectId} title={project.data.title} form={form} progress={rows} />}
       {tab === 'plot' && form && <RobPlotTab projectId={projectId} title={project.data.title} form={form} progress={rows} />}
-      {tab !== 'form' && !form && (
+      {tab === 'import' && <ImportTab key={kind} kind={kind} projectId={projectId} form={form} progress={rows} />}
+      {tab !== 'form' && tab !== 'import' && !form && (
         <EmptyState title={`Set up the ${M.noun} form first`} action={<Link className="underline" to="?tab=form">Choose a form</Link>}>
           Pick a ready-made form and adjust it. Your co-reviewer will use the same one.
         </EmptyState>

@@ -25,7 +25,7 @@ export function FieldInput({ field, value, onChange, idPrefix }: {
       const set = new Set(Array.isArray(value) ? value : value ? [value] : []);
       return (
         <fieldset aria-label={field.label} className="flex flex-wrap gap-x-4 gap-y-1">
-          {(field.options ?? []).map((o) => (
+          {[...(field.options ?? []), ...[...set].filter((x) => !(field.options ?? []).includes(x))].map((o) => (
             <label key={o} className="flex items-center gap-1.5 text-sm">
               <input type="checkbox" checked={set.has(o)} onChange={(e) => {
                 const next = new Set(set);
