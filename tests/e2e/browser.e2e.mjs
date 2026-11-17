@@ -497,6 +497,45 @@ try {
   check('…project created with Rayyan decisions and source "Rayyan"',
     sql(`select p.title || ':' || count(r.*) filter (where r.title_abstract_decision is not null) || ':' || min(r.database_source) from projects p join study_references r on r.project_id = p.id where p.id='${viaId}' group by p.title`) === 'My Rayyan review:3:Rayyan');
 
+  // Rayyan export from the full-text stage: decisions become full-text decisions; then attach PDFs in bulk.
+  {
+    await page.goto(`${APP}/projects/new`);
+    await page.getByLabel('Review title').fill('Rayyan full text');
+    await page.getByRole('button', { name: 'Create review' }).click();
+    await page.getByRole('heading', { name: 'Rayyan full text' }).waitFor();
+    const ftId = page.url().split('/p/')[1].split('/')[0];
+    await page.goto(`${APP}/p/${ftId}/import`);
+    await page.getByLabel('Reference file').setInputFiles(path.join(FX, 'rayyan-export.zip'));
+    await page.getByLabel(/Database source/).selectOption('Other');
+    await page.getByLabel('Custom source name').fill('Rayyan');
+    await page.getByRole('button', { name: 'Preview import' }).click();
+    await page.getByRole('heading', { name: 'Import preview' }).waitFor({ timeout: 30000 });
+    await page.getByTestId('rayyan-stage-ft').check();
+    await page.getByRole('button', { name: /^Import 5 references$/ }).click();
+    await page.getByRole('heading', { name: '✓ Import complete' }).waitFor({ timeout: 60000 });
+    check('Rayyan as full-text decisions: all included at title/abstract; include/exclude carried to full text, maybe waits',
+      sql(`select string_agg(title_abstract_decision || ':' || coalesce(full_text_decision,'-') || ':' || coalesce(full_text_exclusion_reason,'-'), ',' order by seq) from study_references where project_id='${ftId}'`)
+        === 'include:include:-,include:exclude:Wrong study design; Wrong population,include:-:-,include:-:-,include:-:-',
+      sql(`select string_agg(coalesce(title_abstract_decision,'-') || ':' || coalesce(full_text_decision,'-'), ',' order by seq) from study_references where project_id='${ftId}'`));
+    check('Rayyan as full-text decisions: exactly the included study goes on to data extraction',
+      sql(`select count(*) from study_references where project_id='${ftId}' and full_text_decision='include'`) === '1');
+    // Bulk PDFs: two named by title, one that matches nothing.
+    const titles = sql(`select title from study_references where project_id='${ftId}' order by seq limit 2`).split('\n');
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+    await page.getByTestId('bulk-pdf-files').setInputFiles([
+      ...titles.map((t) => ({ name: `${t.replace(/[^\w ]+/g, ' ').trim()}.pdf`, mimeType: 'application/pdf', buffer: pdf })),
+      { name: 'scan0001.pdf', mimeType: 'application/pdf', buffer: pdf },
+    ]);
+    await page.getByTestId('bulk-pdf-row').first().waitFor();
+    await page.waitForFunction(() => /2 of 3 files ready/.test(document.querySelector('[data-testid="bulk-pdf-summary"]')?.textContent ?? ''), null, { timeout: 10000 }).catch(() => {});
+    check('Bulk PDFs: files matched to papers by title; an unmatched file is left out', /2 of 3 files ready/.test(await page.getByTestId('bulk-pdf-summary').textContent()), await page.getByTestId('bulk-pdf-summary').textContent());
+    await page.getByTestId('bulk-pdf-go').click();
+    await page.getByTestId('bulk-pdf-done').waitFor({ timeout: 30000 });
+    check('Bulk PDFs: attached to the right papers and marked available',
+      sql(`select count(*) from full_text_files f join study_references r on r.id=f.reference_id where f.project_id='${ftId}' and r.full_text_status='available'`) === '2');
+    await shot(page, '25b-bulk-pdfs');
+  }
+
   // ---------------------------------------------------------------- Criteria keywords + multi-select
   await page.goto(`${APP}/projects/new`);
   await page.getByLabel('Review title').fill('Bulk and keywords');

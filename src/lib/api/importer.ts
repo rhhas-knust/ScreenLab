@@ -37,6 +37,13 @@ export interface ImportOptions {
   records: ParsedRecord[];
   /** Carry over screening decisions, exclusion reasons, labels (as tags) and notes exported by Rayyan. */
   importRayyan?: boolean;
+  /**
+   * Which stage the Rayyan decisions belong to. 'full_text': the review was
+   * screened at full text in Rayyan, so every record counts as included at
+   * title/abstract and the Rayyan decision becomes its full-text decision
+   * (included records go straight on to data extraction).
+   */
+  rayyanStage?: 'title_abstract' | 'full_text';
   /** Continue a previously interrupted import */
   resume?: { batchId: string; startIndex: number; insertedIds: string[] };
   onProgress?: (done: number, total: number) => void;
@@ -120,7 +127,15 @@ export async function importRecords(opts: ImportOptions): Promise<ImportOutcome>
         database_source: opts.overrideSource || !r.database_source ? (opts.databaseSource || r.database_source) : r.database_source,
         language: r.language,
         original_record: { ...r.original, __file: opts.fileName, __record_no: r.recordNo },
-        ...(ry ? {
+        // A full-text-stage export: every record passed title/abstract, undecided ones wait at full text.
+        ...(hasRayyan && opts.rayyanStage === 'full_text' ? {
+          title_abstract_decision: 'include',
+          title_abstract_screened_at: now,
+          full_text_decision: decision === 'maybe' ? null : decision,
+          full_text_exclusion_reason: decision === 'exclude' ? reason : null,
+          full_text_screened_at: decision && decision !== 'maybe' ? now : null,
+          notes: ry ? rayyanNotesText(ry) : null,
+        } : ry ? {
           title_abstract_decision: decision,
           title_abstract_exclusion_reason: reason,
           title_abstract_screened_at: decision ? now : null,
@@ -150,7 +165,7 @@ export async function importRecords(opts: ImportOptions): Promise<ImportOutcome>
   await supabase.from('import_batches').update({ records_imported: inserted.length }).eq('id', batchId);
   if (!error || inserted.length > (opts.resume?.insertedIds.length ?? 0)) {
     await logActivity(projectId, 'import',
-      `Imported ${inserted.length.toLocaleString()} references from ${opts.fileName}${opts.databaseSource ? ` (${opts.databaseSource})` : ''}${rayyan ? ' with Rayyan screening decisions' : ''}`,
+      `Imported ${inserted.length.toLocaleString()} references from ${opts.fileName}${opts.databaseSource ? ` (${opts.databaseSource})` : ''}${rayyan ? ` with Rayyan screening decisions${opts.rayyanStage === 'full_text' ? ' (as full-text decisions)' : ''}` : ''}`,
       { batch_id: batchId, file: opts.fileName, format: opts.format, detected: records.length, imported: inserted.length, complete: !error });
   }
   return { batchId, insertedIds: inserted, nextIndex: Math.min(i, records.length), error };
@@ -164,21 +179,25 @@ export async function importRecords(opts: ImportOptions): Promise<ImportOutcome>
 async function writeRayyanExtras(
   projectId: string,
   slice: ParsedRecord[],
-  rows: { id: string; title_abstract_decision?: string | null; title_abstract_exclusion_reason?: string | null }[],
+  rows: {
+    id: string; title_abstract_decision?: string | null; title_abstract_exclusion_reason?: string | null;
+    full_text_decision?: string | null; full_text_exclusion_reason?: string | null;
+  }[],
   tagIds: Map<string, string>,
   me: string | null,
 ): Promise<unknown | null> {
-  const decided = rows.filter((r) => r.title_abstract_decision);
-  if (decided.length && me) {
+  for (const stage of ['title_abstract', 'full_text'] as const) {
+    const decided = rows.filter((r) => r[`${stage}_decision`]);
+    if (!decided.length || !me) continue;
     const h = await supabase.from('screening_decisions').insert(decided.map((r) => ({
-      project_id: projectId, reference_id: r.id, reviewer_id: me, stage: 'title_abstract',
-      decision: r.title_abstract_decision, exclusion_reason: r.title_abstract_exclusion_reason ?? null,
+      project_id: projectId, reference_id: r.id, reviewer_id: me, stage,
+      decision: r[`${stage}_decision`], exclusion_reason: r[`${stage}_exclusion_reason`] ?? null,
       previous_decision: null, action: 'restore',
     })));
     if (h.error) return h.error;
     const rd = await supabase.from('reviewer_decisions').insert(decided.map((r) => ({
-      project_id: projectId, reference_id: r.id, reviewer_id: me, stage: 'title_abstract',
-      decision: r.title_abstract_decision, exclusion_reason: r.title_abstract_exclusion_reason ?? null,
+      project_id: projectId, reference_id: r.id, reviewer_id: me, stage,
+      decision: r[`${stage}_decision`], exclusion_reason: r[`${stage}_exclusion_reason`] ?? null,
     })));
     if (rd.error) return rd.error;
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { BulkPdfUpload } from '../components/BulkPdfUpload';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ParseRequest, ParseResponse, ParseStats } from '../lib/import/parse.worker';
@@ -51,6 +52,7 @@ export function ImportPage() {
   const [overrideSource, setOverrideSource] = useState(false);
   const [includeUntitled, setIncludeUntitled] = useState(true);
   const [importRayyan, setImportRayyan] = useState(true);
+  const [rayyanStage, setRayyanStage] = useState<'title_abstract' | 'full_text'>('title_abstract');
   const [zipInfo, setZipInfo] = useState<{ entries: { name: string; size: number }[]; used: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ParseResult | null>(null);
@@ -149,6 +151,7 @@ export function ImportPage() {
       overrideSource,
       records,
       importRayyan: importRayyan && !!stats?.rayyan,
+      rayyanStage,
       resume: resume ? { batchId: resume.batchId, startIndex: resume.nextIndex, insertedIds: resume.insertedIds } : undefined,
       onProgress: (done, total) => setProgress({ done, total, label: 'Importing…' }),
     });
@@ -286,6 +289,19 @@ export function ImportPage() {
                   Untick to import the references unscreened.
                 </span>
               </label>
+              {importRayyan && (
+                <fieldset className="mt-2 ml-6 space-y-1" data-testid="rayyan-stage">
+                  <legend className="text-slate-800">These Rayyan decisions are…</legend>
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="rayyan-stage" className="mt-1" checked={rayyanStage === 'title_abstract'} onChange={() => setRayyanStage('title_abstract')} />
+                    <span><strong>Title/abstract decisions</strong>: included records go on to full-text screening.</span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="rayyan-stage" className="mt-1" checked={rayyanStage === 'full_text'} onChange={() => setRayyanStage('full_text')} data-testid="rayyan-stage-ft" />
+                    <span><strong>Full-text decisions</strong>: I screened full texts in Rayyan. Every record counts as included at title/abstract; included records go straight to data extraction, excluded ones keep their reason, maybe records wait at full-text screening. Attach the PDFs afterwards with “Attach PDFs in bulk”.</span>
+                  </label>
+                </fieldset>
+              )}
             </div>
           )}
           {result.malformed.length > 0 && (
@@ -361,7 +377,7 @@ export function ImportPage() {
           <ul className="mt-2 space-y-1 text-sm">
             <li><strong>{fmt(outcome.insertedIds.length)}</strong> references imported from {file?.name} ({databaseSource})</li>
             {importRayyan && stats?.rayyan && (
-              <li>Rayyan decisions carried over: ✓ {fmt(stats.rayyan.include)} included, ✕ {fmt(stats.rayyan.exclude)} excluded, ? {fmt(stats.rayyan.maybe)} maybe{stats.rayyan.labels.length ? `, ${fmt(stats.rayyan.labels.length)} labels as tags` : ''}</li>
+              <li>Rayyan decisions carried over{rayyanStage === 'full_text' ? ' as full-text decisions' : ''}: ✓ {fmt(stats.rayyan.include)} included, ✕ {fmt(stats.rayyan.exclude)} excluded, ? {fmt(stats.rayyan.maybe)} maybe{stats.rayyan.labels.length ? `, ${fmt(stats.rayyan.labels.length)} labels as tags` : ''}</li>
             )}
             {dupSummary && <li><strong>{fmt(dupSummary.records)}</strong> records flagged as possible duplicates in <strong>{fmt(dupSummary.groups)}</strong> group(s)</li>}
             {!includeUntitled && untitled > 0 && <li>{fmt(untitled)} record(s) without a title were skipped at your request</li>}
@@ -378,6 +394,7 @@ export function ImportPage() {
           </div>
         </Card>
       )}
+      <div className="mt-8" id="pdfs"><BulkPdfUpload projectId={projectId} /></div>
     </div>
   );
 }
