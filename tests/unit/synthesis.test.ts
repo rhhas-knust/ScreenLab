@@ -123,6 +123,13 @@ describe('methods draft', () => {
     expect(text).toMatch(/certainty of evidence for 2 main outcomes was assessed with the GRADE approach/);
   });
 
+  it('describes blinded dual screening and discloses relevance ordering', () => {
+    const text = methodsText(methodsDraft({ ...base, screeningMode: 'dual', blind: true, relevanceUsed: true }));
+    expect(text).toMatch(/Two reviewers independently screened titles and abstracts \(5,766 records\) and then full texts \(349 reports\), each blinded to the other's decisions/);
+    expect(text).toMatch(/ordered by a relevance model .* did not make or change any decision/);
+    expect(methodsText(methodsDraft(base))).not.toMatch(/relevance model/);
+  });
+
   it('leaves clear gaps when there is nothing to report from', () => {
     const text = methodsText(methodsDraft({ ...base, sources: [], extractionForm: null, robForm: null, gradeOutcomes: 0, aiText: null, reviewers: 1, registrationId: 'CRD420261' }));
     expect(text).toMatch(/PROSPERO \(CRD420261\)/);

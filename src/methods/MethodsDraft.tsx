@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { listActivity } from '../lib/api/activity';
 import { getAiDisclosure, listDecisions, listSources, mk, prismaManual, saveSettingsKey } from '../lib/api/methods';
 import { getAll, listTeam, xk } from '../lib/api/extraction';
 import { agreement, readForm, type ExtractionData, type ExtractionForm } from '../lib/extraction/form';
@@ -35,6 +36,7 @@ export function MethodsDraft({ projectId, title }: { projectId: string; title: s
   const team = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
   const ext = useQuery({ queryKey: xk.all(projectId), queryFn: () => getAll(projectId) });
   const rob = useQuery({ queryKey: xk.all(projectId, 'rob'), queryFn: () => getAll(projectId, 'rob') });
+  const relevance = useQuery({ queryKey: ['activity', projectId, 'relevance'], queryFn: () => listActivity(projectId, 0, 1, 'relevance') });
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -50,14 +52,15 @@ export function MethodsDraft({ projectId, title }: { projectId: string; title: s
       project: project.data, stats: stats.data, sources: sources.data,
       duplicatesBeforeImport: prismaManual(settings.data).duplicates_before_import,
       decisions: decisions.data, reviewers: (team.data ?? []).filter((m) => m.role !== 'viewer').length,
-      screeningMode: settings.data.screening_mode, registrationId: pros.registration_id,
+      screeningMode: settings.data.screening_mode, blind: settings.data.blind ?? true, relevanceUsed: (relevance.data?.count ?? 0) > 0,
+      registrationId: pros.registration_id,
       aiText: ai.data && ai.data.suggestions > 0 ? disclosureText(ai.data) : null,
       extractionForm: exForm, extractionAgreement: summarise(exForm, ext.data.extractions),
       robForm, robAgreement: summarise(robForm, rob.data.extractions),
       synthesisPlan: synth && pros.answers.synthesis !== undefined ? answerFor(synth, pros) : '',
       gradeOutcomes: readGrade(settings.data).length,
     }));
-  }, [project.data, stats.data, settings.data, sources.data, decisions.data, ai.data, ai.isLoading, team.data, ext.data, rob.data]);
+  }, [project.data, stats.data, settings.data, sources.data, decisions.data, ai.data, ai.isLoading, team.data, ext.data, rob.data, relevance.data]);
 
   useEffect(() => { if (text === null && generated !== null) setText(saved?.text ?? generated); }, [generated, saved, text]);
   if (generated === null || text === null) return <div className="p-6"><Spinner /></div>;

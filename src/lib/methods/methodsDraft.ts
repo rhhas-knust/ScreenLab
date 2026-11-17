@@ -16,6 +16,10 @@ export interface MethodsInput {
   decisions: ProtocolDecision[];
   reviewers: number;
   screeningMode: 'single' | 'dual';
+  /** Dual screening with each reviewer's decisions hidden until they had made their own. */
+  blind?: boolean;
+  /** Predicted relevance ratings were used to order records for screening. */
+  relevanceUsed?: boolean;
   registrationId: string;
   /** The AI-use paragraph from Methods → AI use, if any AI suggestions were used. */
   aiText: string | null;
@@ -80,8 +84,9 @@ export function methodsDraft(i: MethodsInput): MethodsSection[] {
     text: [
       `Records were ${i.duplicatesBeforeImport ? `de-duplicated before import (${n(i.duplicatesBeforeImport)} duplicates removed) and ` : ''}managed in ScreenLab${dupScreenLab ? `, where a further ${n(dupScreenLab)} duplicates were identified and resolved` : ''}.`,
       i.screeningMode === 'dual'
-        ? `Two reviewers independently screened titles and abstracts (${n(ta)} records)${i.stats.stage2_enabled ? ` and then full texts (${n(ft)} reports)` : ''}, resolving disagreements by discussion.`
+        ? `Two reviewers independently screened titles and abstracts (${n(ta)} records)${i.stats.stage2_enabled ? ` and then full texts (${n(ft)} reports)` : ''}${i.blind ? ', each blinded to the other\'s decisions until they had recorded their own' : ''}, resolving disagreements by discussion.`
         : `One reviewer screened titles and abstracts (${n(ta)} records)${i.stats.stage2_enabled ? ` and then full texts (${n(ft)} reports)` : ''} against the eligibility criteria, recording a reason for each full-text exclusion.`,
+      i.relevanceUsed ? 'To prioritise screening, records were ordered by a relevance model (logistic regression on title, abstract and keyword terms) trained in ScreenLab on the reviewers\' own include and exclude decisions; the model did not make or change any decision, and every record was screened by a reviewer.' : '',
       i.aiText ?? '',
     ].filter(Boolean).join(' '),
   });
