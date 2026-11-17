@@ -4,7 +4,7 @@ import type { Facets, Stage, Tag } from '../lib/types';
 import { Button, Input, Label, Select } from './ui';
 
 export function FiltersForm({
-  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false, picoReady = false,
+  filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false, picoReady = false, dual = false,
 }: {
   filters: RefFilters; setFilters: (f: Partial<RefFilters>) => void; clearFilters: () => void;
   facets: Facets | undefined; tags: Tag[] | undefined; stage: Stage; idPrefix?: string;
@@ -12,19 +12,30 @@ export function FiltersForm({
   criteriaReady?: boolean;
   /** True when the project has PICO keywords. */
   picoReady?: boolean;
+  /** Dual screening: statuses are the reviewer's own, plus final decisions and conflicts. */
+  dual?: boolean;
 }) {
   const id = (s: string) => `${idPrefix}-${s}`;
   return (
     <div className="grid gap-3 text-sm">
       <div>
-        <Label htmlFor={id('status')}>Screening status {stage === 'full_text' ? '(full text)' : '(title/abstract)'}</Label>
+        <Label htmlFor={id('status')}>{dual ? 'Status' : 'Screening status'} {stage === 'full_text' ? '(full text)' : '(title/abstract)'}</Label>
         <Select id={id('status')} value={filters.status} onChange={(e) => setFilters({ status: e.target.value as RefFilters['status'] })}>
           <option value="all">All</option>
-          <option value="unscreened">○ Unscreened</option>
-          <option value="screened">Screened (any decision)</option>
-          <option value="include">✓ Included</option>
-          <option value="exclude">✕ Excluded</option>
-          {stage === 'title_abstract' && <option value="maybe">? Maybe</option>}
+          <optgroup label={dual ? 'Your decision' : 'Decision'}>
+            <option value="unscreened">○ {dual ? 'Not yet screened by you' : 'Unscreened'}</option>
+            <option value="screened">{dual ? 'Screened by you' : 'Screened (any decision)'}</option>
+            <option value="include">✓ {dual ? 'You included' : 'Included'}</option>
+            <option value="exclude">✕ {dual ? 'You excluded' : 'Excluded'}</option>
+            {stage === 'title_abstract' && <option value="maybe">? {dual ? 'You marked Maybe' : 'Maybe'}</option>}
+          </optgroup>
+          {(dual || filters.status === 'conflict' || filters.status.startsWith('final_')) && (
+            <optgroup label="Final, after both reviewers">
+              <option value="conflict">⚠ Conflicts</option>
+              <option value="final_include">✓ Included (final)</option>
+              <option value="final_exclude">✕ Excluded (final)</option>
+            </optgroup>
+          )}
         </Select>
       </div>
       <div>

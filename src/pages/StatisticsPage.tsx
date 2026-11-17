@@ -7,6 +7,7 @@ import { friendlyError } from '../lib/errors';
 import { Alert, Button, Card, Input, Label, PageLoader, Stat, Textarea } from '../components/ui';
 import { BarList } from '../components/BarList';
 import { useToast } from '../components/Toast';
+import { ReviewerStatsCard } from '../components/ReviewerStats';
 
 function FlowBox({ label, value, note }: { label: string; value: number | string; note?: string }) {
   return (
@@ -115,6 +116,8 @@ export function StatisticsPage() {
           <BarList title="Records by publication year (after de-duplication)" rows={[...s.by_year].reverse().slice(0, 30).map((r) => ({ label: String(r.year), value: r.count }))} />
         </div>
       </div>
+
+      <div className="mt-6"><ReviewerStatsCard projectId={projectId} stage2={stage2} /></div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card className="p-5">

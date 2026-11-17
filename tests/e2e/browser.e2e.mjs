@@ -1365,6 +1365,56 @@ try {
     await shot(page, '43-import-extractions');
   }
 
+  // ---------------------------------------------------------------- Independent (dual) screening, blind mode, conflicts
+  {
+    await page.goto(`${APP}/p/${projectId}/settings#screening`);
+    await page.getByTestId('mode-dual').click();
+    await page.getByTestId('blind').waitFor();
+    check('Dual screening: switching mode keeps blind mode on by default',
+      sql(`select screening_mode || ':' || blind from project_settings where project_id='${projectId}'`) === 'dual:true' && await page.getByTestId('blind').isChecked());
+    // A record the owner has already included (their decision carries over).
+    const dualRef = sql(`select r.id from study_references r join reviewer_decisions d on d.reference_id=r.id and d.stage='title_abstract' and d.decision='include' where r.project_id='${projectId}' and r.duplicate_status not in ('duplicate','merged') and not exists (select 1 from reviewer_decisions x where x.reference_id=r.id and x.stage='title_abstract' and x.reviewer_id='0901688c-4622-43dc-99c6-346e83e84957') order by r.seq limit 1`);
+    const ctxD = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const pd = await ctxD.newPage();
+    await pd.goto(`${APP}/login`);
+    await pd.getByLabel('Email').fill('e2e-b@screenlab.test');
+    await pd.getByLabel('Password').fill('E2e-test-password-1');
+    await pd.getByRole('button', { name: 'Sign in' }).click();
+    await pd.waitForURL((u) => !u.pathname.startsWith('/login'));
+    await pd.goto(`${APP}/p/${projectId}/screening?ref=${dualRef}`);
+    await pd.getByTestId('blind-note').waitFor();
+    check('Blind mode: a co-reviewer cannot see the other decision before recording their own',
+      !/Include/.test(await pd.getByTestId('reviewer-decisions').textContent()), await pd.getByTestId('reviewer-decisions').textContent());
+    await pd.getByTestId('decide-maybe').first().click();
+    await waitFor(() => sql(`select title_abstract_conflict from study_references where id='${dualRef}'`) === 't');
+    check('Dual screening: disagreement makes the record a conflict with no final decision',
+      sql(`select coalesce(title_abstract_decision,'none') || ':' || title_abstract_conflict from study_references where id='${dualRef}'`) === 'none:true',
+      sql(`select coalesce(title_abstract_decision,'none') || ':' || title_abstract_conflict || ' votes ' || (select string_agg(decision, ',') from reviewer_decisions where reference_id='${dualRef}' and stage='title_abstract') from study_references where id='${dualRef}'`));
+    await pd.goto(`${APP}/p/${projectId}/screening?ref=${dualRef}`);
+    await pd.getByTestId('conflict-note').waitFor();
+    check('Blind mode: after recording their own decision the co-reviewer sees both', /Include/.test(await pd.getByTestId('reviewer-decisions').textContent()) && /Maybe/.test(await pd.getByTestId('reviewer-decisions').textContent()));
+    await ctxD.close();
+    await page.goto(`${APP}/p/${projectId}/screening?status=conflict`);
+    await page.getByRole('list', { name: 'Articles' }).waitFor();
+    check('Dual screening: the Conflicts filter lists the record', /⚠ conflict/.test(await page.getByRole('list', { name: 'Articles' }).textContent()));
+    await page.goto(`${APP}/p/${projectId}/screening?status=conflict&ref=${dualRef}`);
+    await page.getByTestId('resolve-include').click();
+    await waitFor(() => sql(`select title_abstract_resolved from study_references where id='${dualRef}'`) === 't');
+    check('Dual screening: resolving sets the final decision and keeps both reviewers’ own decisions',
+      sql(`select title_abstract_decision || ':' || title_abstract_conflict from study_references where id='${dualRef}'`) === 'include:false'
+      && sql(`select count(*) from reviewer_decisions where reference_id='${dualRef}' and stage='title_abstract'`) === '2',
+      sql(`select coalesce(title_abstract_decision,'none') || ':' || title_abstract_conflict || ':' || title_abstract_resolved || ' votes ' || (select string_agg(decision, ',') from reviewer_decisions where reference_id='${dualRef}' and stage='title_abstract') from study_references where id='${dualRef}'`));
+    await page.goto(`${APP}/p/${projectId}/statistics`);
+    await page.getByTestId('reviewer-stats').waitFor();
+    check('Statistics: each reviewer’s decisions and agreement between reviewers',
+      await page.getByTestId('reviewer-stats-row').count() >= 2 && /Agreement \d+%/.test(await page.getByTestId('agreement-title_abstract').textContent()),
+      await page.getByTestId('agreement-title_abstract').textContent());
+    await shot(page, '44-reviewer-stats');
+    await page.goto(`${APP}/p/${projectId}/settings#screening`);
+    await page.getByRole('radio', { name: /One shared decision/ }).click();
+    await waitFor(() => sql(`select screening_mode from project_settings where project_id='${projectId}'`) === 'single');
+  }
+
   // ---------------------------------------------------------------- Delete
   await page.goto(`${APP}/p/${restoredId}/settings#delete`);
   await page.getByRole('button', { name: 'Delete this project…' }).click();

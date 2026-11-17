@@ -38,6 +38,8 @@ export interface ProjectSettings {
   stage2_enabled: boolean;
   keyboard_shortcuts_enabled: boolean;
   screening_mode: 'single' | 'dual';
+  /** Dual mode: hide a co-reviewer's decision until you have made your own. */
+  blind?: boolean;
   additional_records_other_sources: number;
   prisma_notes: string | null;
   settings: Record<string, unknown>;
@@ -86,6 +88,16 @@ export interface Reference extends BibRecord {
   tag_names: string[];
   full_text_url: string | null;
   full_text_status: FullTextStatus;
+  /** Dual screening: reviewers disagree / someone settled the record. */
+  title_abstract_conflict?: boolean;
+  full_text_conflict?: boolean;
+  title_abstract_resolved?: boolean;
+  full_text_resolved?: boolean;
+  /** The signed-in reviewer's own decision (from the screening_refs view). */
+  my_title_abstract_decision?: Decision | null;
+  my_title_abstract_exclusion_reason?: string | null;
+  my_full_text_decision?: 'include' | 'exclude' | null;
+  my_full_text_exclusion_reason?: string | null;
   /** Who has screened it at each stage (user ids, oldest first). */
   title_abstract_reviewers?: string[];
   full_text_reviewers?: string[];
@@ -103,6 +115,8 @@ export type ReferenceListItem = Pick<
   | 'title_abstract_decision' | 'title_abstract_exclusion_reason' | 'title_abstract_screened_at'
   | 'full_text_decision' | 'full_text_exclusion_reason' | 'full_text_screened_at'
   | 'duplicate_status' | 'tag_names' | 'full_text_status' | 'title_abstract_reviewers' | 'full_text_reviewers'
+  | 'title_abstract_conflict' | 'full_text_conflict' | 'my_title_abstract_decision' | 'my_title_abstract_exclusion_reason'
+  | 'my_full_text_decision' | 'my_full_text_exclusion_reason'
 >;
 
 export interface ExclusionReason {

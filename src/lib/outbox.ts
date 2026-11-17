@@ -20,7 +20,9 @@ export interface DecisionOp {
   stage: Stage;
   decision: Decision | null;
   reason: string | null;
-  action: 'decide' | 'undo';
+  action: 'decide' | 'undo' | 'resolve';
+  /** Dual screening: the change is the reviewer's own decision, not the record's final one. */
+  dual?: boolean;
   clientTs: string;
   attempts: number;
   lastError?: string;
@@ -283,6 +285,13 @@ function isServerHiccup(e: unknown): boolean {
 function applyOp<T extends Partial<Reference>>(ref: T, op: OutboxOp): T {
   if (op.kind === 'fields') return { ...ref, ...op.patch };
   const now = op.clientTs;
+  const reason = op.decision === 'exclude' ? op.reason : null;
+  if (op.dual && op.action !== 'resolve') {
+    return op.stage === 'title_abstract'
+      ? { ...ref, my_title_abstract_decision: op.decision, my_title_abstract_exclusion_reason: reason }
+      : { ...ref, my_full_text_decision: op.decision as 'include' | 'exclude' | null, my_full_text_exclusion_reason: reason };
+  }
+  if (op.action === 'resolve') ref = { ...ref, [op.stage === 'title_abstract' ? 'title_abstract_conflict' : 'full_text_conflict']: false };
   if (op.stage === 'title_abstract') {
     return {
       ...ref,

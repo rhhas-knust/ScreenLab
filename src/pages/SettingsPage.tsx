@@ -194,7 +194,27 @@ export function SettingsPage() {
                 onChange={(e) => saveSetting({ stage2_enabled: e.target.checked }, `${e.target.checked ? 'Enabled' : 'Disabled'} full-text screening (stage 2)`)} />
               <span><strong>Enable Stage 2 — full-text screening.</strong> Records included at title/abstract move to full-text screening (Include / Exclude with a required reason). Turning this off hides stage 2 but keeps any full-text decisions.</span>
             </label>
-            <p className="text-slate-600">Stage 1 (title/abstract: Include / Exclude / Maybe) is always enabled. Screening mode: single reviewer (the database is ready for multiple reviewers in a future version).</p>
+            <p className="text-slate-600">Stage 1 (title/abstract: Include / Exclude / Maybe) is always enabled.</p>
+            <fieldset className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid="screening-mode">
+              <legend className="px-1 font-semibold text-ink-900">How reviewers screen</legend>
+              <label className="flex items-start gap-2">
+                <input type="radio" name="screening-mode" className="mt-1" checked={settings.screening_mode !== 'dual'}
+                  onChange={() => saveSetting({ screening_mode: 'single' }, 'Screening mode: one shared decision per record')} />
+                <span><strong>One shared decision.</strong> Any reviewer’s decision is the record’s decision; a later decision replaces an earlier one.</span>
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="radio" name="screening-mode" className="mt-1" checked={settings.screening_mode === 'dual'} data-testid="mode-dual"
+                  onChange={() => saveSetting({ screening_mode: 'dual' }, 'Screening mode: independent decisions by two reviewers')} />
+                <span><strong>Independent decisions by two reviewers.</strong> Each reviewer records their own decision. A record is included or excluded once two reviewers agree; when they disagree it becomes a conflict to resolve. Decisions already made are kept.</span>
+              </label>
+              {settings.screening_mode === 'dual' && (
+                <label className="ml-6 flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={settings.blind ?? true} data-testid="blind"
+                    onChange={(e) => saveSetting({ blind: e.target.checked }, `${e.target.checked ? 'Turned on' : 'Turned off'} blind mode`)} />
+                  <span><strong>Blind mode.</strong> A reviewer sees a co-reviewer’s decision on a record only after recording their own. Turn off to let everyone see every decision.</span>
+                </label>
+              )}
+            </fieldset>
           </div>
         </Section>
         <Section id="shortcuts" title="Keyboard shortcuts">

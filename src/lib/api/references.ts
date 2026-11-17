@@ -3,7 +3,7 @@ import { must } from '../errors';
 import type { Decision, Reference, ReferenceListItem, Stage } from '../types';
 import { PICO_KEYS, PICO_LABELS, activePico, type CriteriaTerms, type PicoKey } from '../criteria';
 
-export type StatusFilter = 'all' | 'unscreened' | 'screened' | 'include' | 'exclude' | 'maybe';
+export type StatusFilter = 'all' | 'unscreened' | 'screened' | 'include' | 'exclude' | 'maybe' | 'conflict' | 'final_include' | 'final_exclude';
 export type DupFilter = 'active' | 'all' | 'none' | 'possible' | 'duplicate' | 'kept' | 'merged';
 export type SortKey = 'seq' | 'title' | 'year' | 'authors' | 'status' | 'screened_at' | 'database_source';
 
@@ -30,6 +30,8 @@ export interface RefFilters {
   /** The signed-in user and their co-reviewers (supplied by the page; needed for `by`). */
   me?: string;
   partners?: string[];
+  /** Dual screening: status filters use the signed-in reviewer's own decision. */
+  dual?: boolean;
 }
 
 export type PicoFilter = '' | 'all' | 'miss_any' | 'none' | `miss_${PicoKey}`;
@@ -69,13 +71,20 @@ export const SORT_LABELS: Record<SortKey, string> = {
 export const LIST_COLUMNS =
   'id,seq,title,authors,year,journal,database_source,title_abstract_decision,title_abstract_exclusion_reason,' +
   'title_abstract_screened_at,full_text_decision,full_text_exclusion_reason,full_text_screened_at,duplicate_status,tag_names,full_text_status,' +
-  'title_abstract_reviewers,full_text_reviewers';
+  'title_abstract_reviewers,full_text_reviewers,title_abstract_conflict,full_text_conflict,' +
+  'my_title_abstract_decision,my_title_abstract_exclusion_reason,my_full_text_decision,my_full_text_exclusion_reason';
 
-export function decisionColumn(stage: Stage) {
-  return stage === 'title_abstract' ? 'title_abstract_decision' : 'full_text_decision';
+/** Screening reads go through this view: the table plus the caller's own decisions. */
+export const REFS_VIEW = 'screening_refs';
+
+export function decisionColumn(stage: Stage, mine = false) {
+  return `${mine ? 'my_' : ''}${stage === 'title_abstract' ? 'title_abstract_decision' : 'full_text_decision'}`;
 }
-export function reasonColumn(stage: Stage) {
-  return stage === 'title_abstract' ? 'title_abstract_exclusion_reason' : 'full_text_exclusion_reason';
+export function reasonColumn(stage: Stage, mine = false) {
+  return `${mine ? 'my_' : ''}${stage === 'title_abstract' ? 'title_abstract_exclusion_reason' : 'full_text_exclusion_reason'}`;
+}
+export function conflictColumn(stage: Stage) {
+  return stage === 'title_abstract' ? 'title_abstract_conflict' : 'full_text_conflict';
 }
 export function reviewersColumn(stage: Stage) {
   return stage === 'title_abstract' ? 'title_abstract_reviewers' : 'full_text_reviewers';
@@ -111,7 +120,8 @@ type Query = any;
  */
 export function applyFilters(query: Query, projectId: string, stage: Stage, f: RefFilters): Query {
   let qb = query.eq('project_id', projectId);
-  const dcol = decisionColumn(stage);
+  const dcol = decisionColumn(stage, !!f.dual);
+  const fcol = decisionColumn(stage);
 
   if (f.dup === 'active') qb = qb.not('duplicate_status', 'in', '(duplicate,merged)');
   else if (f.dup !== 'all') qb = qb.eq('duplicate_status', f.dup);
@@ -122,6 +132,9 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
     case 'unscreened': qb = qb.is(dcol, null); break;
     case 'screened': qb = qb.not(dcol, 'is', null); break;
     case 'include': case 'exclude': case 'maybe': qb = qb.eq(dcol, f.status); break;
+    case 'conflict': qb = qb.eq(conflictColumn(stage), true); break;
+    case 'final_include': qb = qb.eq(fcol, 'include'); break;
+    case 'final_exclude': qb = qb.eq(fcol, 'exclude'); break;
   }
 
   const terms = f.q.toLowerCase().split(/\s+/).map((t) => t.trim()).filter(Boolean).slice(0, 8);
@@ -136,7 +149,7 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.language) qb = qb.eq('language', f.language);
   if (f.tags.length) qb = qb.contains('tag_names', f.tags);
   if (f.ftStatus) qb = qb.eq('full_text_status', f.ftStatus);
-  if (f.reason) qb = qb.eq(reasonColumn(stage), f.reason);
+  if (f.reason) qb = qb.eq(reasonColumn(stage, !!f.dual), f.reason);
   if (f.kw && f.terms) qb = applyKeywordFilter(qb, f.kw, f.terms);
   if (f.pico && f.terms) qb = applyPicoFilter(qb, f.pico, f.terms);
   if (f.by && f.me) qb = applyReviewerFilter(qb, reviewersColumn(stage), f.by, f.me, f.partners ?? []);
@@ -243,7 +256,7 @@ export interface ListPage {
 export async function listReferences(
   projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, page: number, pageSize: number, extraColumns = '',
 ): Promise<ListPage> {
-  let qb = supabase.from('study_references').select(LIST_COLUMNS + extraColumns, { count: 'exact' });
+  let qb = supabase.from(REFS_VIEW).select(LIST_COLUMNS + extraColumns, { count: 'exact' });
   qb = applyFilters(qb, projectId, stage, filters);
   qb = applyOrder(qb, stage, sort);
   const from = page * pageSize;
@@ -253,14 +266,14 @@ export async function listReferences(
 }
 
 export async function getReference(id: string): Promise<Reference> {
-  return must(await supabase.from('study_references').select('*').eq('id', id).single()) as Reference;
+  return must(await supabase.from(REFS_VIEW).select('*').eq('id', id).single()) as Reference;
 }
 
 /** Next / previous reference in the current list order (any status). */
 export async function neighbor(
   projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, cur: Reference, direction: 'next' | 'prev',
 ): Promise<Reference | null> {
-  let qb = supabase.from('study_references').select('*');
+  let qb = supabase.from(REFS_VIEW).select('*');
   qb = applyFilters(qb, projectId, stage, filters);
   qb = applyKeyset(qb, stage, sort, cur as unknown as Reference & Record<string, unknown>, direction);
   qb = applyOrder(qb, stage, sort, direction === 'prev');
@@ -278,14 +291,14 @@ export async function fetchQueue(
   const f: RefFilters = { ...filters, status: 'unscreened' };
   let rows: Reference[] = [];
   if (after) {
-    let qb = supabase.from('study_references').select('*');
+    let qb = supabase.from(REFS_VIEW).select('*');
     qb = applyFilters(qb, projectId, stage, f);
     qb = applyKeyset(qb, stage, sort, after as unknown as Reference & Record<string, unknown>, 'next');
     qb = applyOrder(qb, stage, sort);
     rows = must(await qb.limit(limit)) as Reference[];
   }
   if (rows.length < limit) {
-    let qb = supabase.from('study_references').select('*');
+    let qb = supabase.from(REFS_VIEW).select('*');
     qb = applyFilters(qb, projectId, stage, f);
     qb = applyOrder(qb, stage, sort);
     const more = must(await qb.limit(limit)) as Reference[];
@@ -301,7 +314,7 @@ export async function updateReferenceFields(id: string, patch: Partial<Reference
 }
 
 export async function recordDecision(args: {
-  referenceId: string; stage: Stage; decision: string | null; reason: string | null; action: 'decide' | 'undo'; clientTs: string;
+  referenceId: string; stage: Stage; decision: string | null; reason: string | null; action: 'decide' | 'undo' | 'resolve'; clientTs: string;
 }): Promise<Reference> {
   return must(await supabase.rpc('record_decision', {
     p_reference_id: args.referenceId,
@@ -340,13 +353,13 @@ export async function fetchAllReferences(projectId: string, onProgress?: (n: num
 export async function fetchMatchingIds(
   projectId: string, stage: Stage, filters: RefFilters, sort: RefSort, onProgress?: (n: number) => void,
 ): Promise<{ id: string; decision: Decision | null; title: string | null }[]> {
-  const col = decisionColumn(stage);
+  const col = decisionColumn(stage, !!filters.dual);
   const out: { id: string; decision: Decision | null; title: string | null }[] = [];
   for (let from = 0; ; from += 1000) {
-    let qb = supabase.from('study_references').select(`id,title,${col}`);
+    let qb = supabase.from(REFS_VIEW).select(`id,title,${col}`);
     qb = applyFilters(qb, projectId, stage, filters);
     qb = applyOrder(qb, stage, sort);
-    const rows = must(await qb.range(from, from + 999)) as Record<string, unknown>[];
+    const rows = must(await qb.range(from, from + 999)) as unknown as Record<string, unknown>[];
     for (const r of rows) out.push({ id: r.id as string, decision: (r[col] as Decision | null) ?? null, title: (r.title as string | null) ?? null });
     onProgress?.(out.length);
     if (rows.length < 1000) break;
@@ -376,4 +389,15 @@ export async function recordDecisionsBulk(
     onProgress?.(Math.min(i + size, items.length), items.length);
   }
   return previous;
+}
+
+export interface ReviewerStats {
+  reviewers: { reviewer_id: string; stage: Stage; screened: number; include: number; exclude: number; maybe: number }[];
+  /** Two reviewers' decisions on the same record (only pairs the caller may see). */
+  pairs: { stage: Stage; a: Decision; b: Decision }[];
+  ta_conflicts: number;
+  ft_conflicts: number;
+}
+export async function reviewerStats(projectId: string): Promise<ReviewerStats> {
+  return (must(await supabase.rpc('reviewer_stats', { p_project_id: projectId })) ?? { reviewers: [], pairs: [], ta_conflicts: 0, ft_conflicts: 0 }) as ReviewerStats;
 }

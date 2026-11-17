@@ -78,35 +78,67 @@ async function reviewerDecisions(referenceId: string, stage: Stage): Promise<Rev
     .eq('reference_id', referenceId).eq('stage', stage).order('updated_at')) as ReviewerDecisionRow[];
 }
 
-/** Each co-reviewer's own decision on this paper at this stage. */
-export function ReviewerDecisions({ referenceId, stage, team, me, version }: {
+/** Each co-reviewer's own decision on this paper at this stage; in dual screening, the final status and conflict resolution. */
+export function ReviewerDecisions({ referenceId, stage, team, me, version, dual = false, blind = false, final, conflict = false, canResolve = false, onResolve }: {
   referenceId: string; stage: Stage; team: TeamMember[]; me: string | undefined; version: string;
+  dual?: boolean; blind?: boolean; final?: Decision | null; conflict?: boolean; canResolve?: boolean;
+  onResolve?: (decision: Decision, reason: string | null) => void;
 }) {
   const q = useQuery({ queryKey: ['reviewer-decisions', referenceId, stage, version], queryFn: () => reviewerDecisions(referenceId, stage) });
   const map = people(team, me);
   const rows = q.data ?? [];
   const decided = new Set(rows.map((r) => r.reviewer_id));
+  const iVoted = !!me && decided.has(me);
+  const hidden = dual && blind && !iVoted;
   const waiting = team.filter((t) => t.role !== 'viewer' && !decided.has(t.user_id));
-  const differ = new Set(rows.map((r) => r.decision)).size > 1;
+  const differ = conflict || new Set(rows.map((r) => r.decision)).size > 1;
+  // One "accept" button per distinct decision the reviewers made.
+  const choices = rows.filter((r, i) => rows.findIndex((x) => x.decision === r.decision && x.exclusion_reason === r.exclusion_reason) === i);
   return (
     <div className="space-y-1 text-sm" data-testid="reviewer-decisions">
-      <div className="font-semibold text-ink-900">Reviewers</div>
-      {differ && <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">Reviewers disagree on this paper. Talk it through and agree a final decision.</p>}
-      {rows.length === 0 && !q.isLoading && <p className="text-xs text-slate-600">No one has screened this paper yet{stage === 'full_text' ? ' at full text' : ''}.</p>}
-      <ul className="space-y-1">
-        {rows.map((r) => {
-          const w = who(map, r.reviewer_id);
-          return (
-            <li key={r.reviewer_id} className="flex flex-wrap items-center gap-2">
-              <ReviewerChips ids={[r.reviewer_id]} map={map} />
-              <span className="text-xs text-slate-700">{w.you ? 'You' : nameOf(w.email)}</span>
-              <DecisionBadge decision={r.decision} reason={r.exclusion_reason} />
-            </li>
-          );
-        })}
-      </ul>
-      {rows.length > 0 && waiting.length > 0 && (
-        <p className="text-xs text-slate-500">Not yet screened by {waiting.map((t) => (t.user_id === me ? 'you' : nameOf(t.email))).join(', ')}.</p>
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-ink-900">Reviewers</span>
+        {dual && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{blind ? 'Independent, blind' : 'Independent'}</span>}
+      </div>
+      {dual && (
+        <p className="text-xs text-slate-700" data-testid="final-status">
+          Final decision:{' '}
+          {hidden ? <span>shown after you record yours</span>
+            : final ? <DecisionBadge decision={final} compact /> : conflict ? <strong className="text-amber-900">conflict, to resolve</strong> : <span>waiting for {rows.length >= 1 ? 'a second reviewer' : 'two reviewers'}</span>}
+        </p>
+      )}
+      {hidden ? (
+        <p className="text-xs text-slate-600" data-testid="blind-note">Blind mode: you see your co-reviewers’ decisions on this paper after you record your own.</p>
+      ) : (
+        <>
+          {differ && <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid="conflict-note">Reviewers disagree on this paper.{dual ? ' Talk it through, then change your decision or resolve it below.' : ' Talk it through and agree a final decision.'}</p>}
+          {rows.length === 0 && !q.isLoading && <p className="text-xs text-slate-600">No one has screened this paper yet{stage === 'full_text' ? ' at full text' : ''}.</p>}
+          <ul className="space-y-1">
+            {rows.map((r) => {
+              const w = who(map, r.reviewer_id);
+              return (
+                <li key={r.reviewer_id} className="flex flex-wrap items-center gap-2">
+                  <ReviewerChips ids={[r.reviewer_id]} map={map} />
+                  <span className="text-xs text-slate-700">{w.you ? 'You' : nameOf(w.email)}</span>
+                  <DecisionBadge decision={r.decision} reason={r.exclusion_reason} />
+                </li>
+              );
+            })}
+          </ul>
+          {rows.length > 0 && waiting.length > 0 && (
+            <p className="text-xs text-slate-500">Not yet screened by {waiting.map((t) => (t.user_id === me ? 'you' : nameOf(t.email))).join(', ')}.</p>
+          )}
+          {dual && conflict && canResolve && onResolve && (
+            <div className="flex flex-wrap gap-1 pt-1" role="group" aria-label="Resolve the conflict">
+              {choices.map((c) => (
+                <button key={`${c.decision}:${c.exclusion_reason}`} type="button" onClick={() => onResolve(c.decision, c.exclusion_reason)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-50" data-testid={`resolve-${c.decision}`}>
+                  Resolve as {c.decision === 'include' ? 'Include' : c.decision === 'exclude' ? `Exclude${c.exclusion_reason ? ` (${c.exclusion_reason})` : ''}` : 'Maybe'}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

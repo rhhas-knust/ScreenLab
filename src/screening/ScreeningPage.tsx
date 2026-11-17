@@ -5,6 +5,7 @@ import {
   fetchMatchingIds, fetchQueue, getReference, listReferences, neighbor, setDuplicateStatus, type ListPage,
 } from '../lib/api/references';
 import { createReason } from '../lib/api/tags';
+import { reviewerStats } from '../lib/api/references';
 import { updateSettings } from '../lib/api/projects';
 import { friendlyError } from '../lib/errors';
 import { fmt, pct, qk, useCriteriaTerms, useFacets, useProject, useReasons, useSettings, useStats, useTags } from '../lib/hooks';
@@ -47,11 +48,14 @@ interface UndoEntry {
   newReason: string | null;
 }
 
-function decisionOf(r: Pick<Reference, 'title_abstract_decision' | 'full_text_decision'>, stage: Stage): Decision | null {
-  return stage === 'title_abstract' ? r.title_abstract_decision : r.full_text_decision;
+/** The decision shown and changed by this reviewer: the shared one, or in dual screening their own. */
+function decisionOf(r: Partial<Reference>, stage: Stage, mine = false): Decision | null {
+  if (mine) return (stage === 'title_abstract' ? r.my_title_abstract_decision : r.my_full_text_decision) ?? null;
+  return (stage === 'title_abstract' ? r.title_abstract_decision : r.full_text_decision) ?? null;
 }
-function reasonOf(r: Pick<Reference, 'title_abstract_exclusion_reason' | 'full_text_exclusion_reason'>, stage: Stage): string | null {
-  return stage === 'title_abstract' ? r.title_abstract_exclusion_reason : r.full_text_exclusion_reason;
+function reasonOf(r: Partial<Reference>, stage: Stage, mine = false): string | null {
+  if (mine) return (stage === 'title_abstract' ? r.my_title_abstract_exclusion_reason : r.my_full_text_exclusion_reason) ?? null;
+  return (stage === 'title_abstract' ? r.title_abstract_exclusion_reason : r.full_text_exclusion_reason) ?? null;
 }
 function decisionText(d: Decision | null, reason: string | null) {
   const m = DECISION_META[d ?? 'unscreened'];
@@ -74,6 +78,7 @@ export function ScreeningPage() {
   const toast = useToast();
   const { data: project } = useProject(projectId);
   const { data: settings } = useSettings(projectId);
+  const dual = settings?.screening_mode === 'dual';
   const { data: stats } = useStats(projectId);
   const { data: reasons = [] } = useReasons(projectId);
   const { data: tags = [] } = useTags(projectId);
@@ -86,11 +91,12 @@ export function ScreeningPage() {
   const teamQuery = useQuery({ queryKey: xk.team(projectId), queryFn: () => listTeam(projectId) });
   const team = useMemo(() => teamQuery.data ?? [], [teamQuery.data]);
   // The "Screened by" filter needs the team, so the first article waits for it.
-  const teamReady = !teamQuery.isPending;
+  // The first article waits for settings too: dual screening changes what "unscreened" means.
+  const teamReady = !teamQuery.isPending && !!settings;
   const partners = useMemo(() => team.filter((t) => t.user_id !== me).map((t) => t.user_id), [team, me]);
   const reviewerMap = useMemo(() => people(team, me), [team, me]);
   const hasTeam = partners.length > 0;
-  const filters = useMemo(() => ({ ...urlFilters, terms: criteria, me, partners }), [urlFilters, criteria, me, partners]);
+  const filters = useMemo(() => ({ ...urlFilters, terms: criteria, me, partners, dual }), [urlFilters, criteria, me, partners, dual]);
   const stage: Stage = settings && !settings.stage2_enabled ? 'title_abstract' : stageParam;
   // Each panel is rendered exactly once: in the side columns on wide screens,
   // in the drawer / below the article / bottom bar on narrow ones.
@@ -111,6 +117,7 @@ export function ScreeningPage() {
   const [searchText, setSearchText] = useState(filters.q);
   const [autoAdvance, setAutoAdvance] = useState(() => readLocal('screenlab:autoAdvance', true));
   const [historyVersion, setHistoryVersion] = useState(0);
+  const myStats = useQuery({ queryKey: ['reviewer-stats', projectId, historyVersion], queryFn: () => reviewerStats(projectId), enabled: dual });
   const undoKey = `screenlab:undo:${projectId}`;
   const [undoStack, setUndoStack] = useState<UndoEntry[]>(() => {
     try {
@@ -153,8 +160,8 @@ export function ScreeningPage() {
   const key = (id: string, s: Stage = stage) => `${s}:${id}`;
   const isUnscreened = useCallback((r: Reference) => {
     const o = outbox.overlay(r);
-    return decisionOf(o, stage) == null && !decidedRef.current.has(`${stage}:${r.id}`);
-  }, [stage]);
+    return decisionOf(o, stage, dual) == null && !decidedRef.current.has(`${stage}:${r.id}`);
+  }, [stage, dual]);
 
   const show = useCallback((r: Reference) => {
     const o = outbox.overlay(r);
@@ -332,8 +339,8 @@ export function ScreeningPage() {
     const cur = current;
     if (!cur) return;
     if (stage === 'full_text' && decision === 'maybe') return;
-    const prevD = decisionOf(cur, stage);
-    const prevR = reasonOf(cur, stage);
+    const prevD = decisionOf(cur, stage, dual);
+    const prevR = reasonOf(cur, stage, dual);
 
     if (decision === 'exclude' && reason === undefined) {
       setPendingChange(null);
@@ -359,7 +366,7 @@ export function ScreeningPage() {
 
     // 1) durable local write + server sync (outbox), 2) optimistic UI, 3) advance
     outbox.enqueueDecision({
-      projectId, referenceId: cur.id, title: cur.title, stage, decision, reason: newReason, action: 'decide',
+      projectId, referenceId: cur.id, title: cur.title, stage, decision, reason: newReason, action: 'decide', dual,
     });
     decidedRef.current.add(key(cur.id));
     setUndoStack((s) => [...s.slice(-49), { refId: cur.id, stage, title: cur.title, prevDecision: prevD, prevReason: prevR, newDecision: decision, newReason }]);
@@ -375,7 +382,19 @@ export function ScreeningPage() {
     setCurrent(updated);
     if (autoAdvance) void advance(cur);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, stage, projectId, autoAdvance, advance, patchListCache, toast]);
+  }, [current, stage, dual, projectId, autoAdvance, advance, patchListCache, toast]);
+
+  /** Dual screening: settle a conflict with one of the reviewers' decisions. */
+  const resolve = useCallback((decision: Decision, reason: string | null) => {
+    const cur = current;
+    if (!cur) return;
+    outbox.enqueueDecision({ projectId, referenceId: cur.id, title: cur.title, stage, decision, reason, action: 'resolve', dual });
+    const updated = outbox.overlay(cur);
+    recentRef.current.set(cur.id, updated);
+    patchListCache(cur.id, updated);
+    setCurrent(updated);
+    toast(`Conflict resolved: ${decisionText(decision, reason)}`);
+  }, [current, projectId, stage, dual, patchListCache, toast]);
 
   const undo = useCallback(() => {
     const entry = undoStack[undoStack.length - 1];
@@ -385,7 +404,7 @@ export function ScreeningPage() {
     }
     outbox.enqueueDecision({
       projectId, referenceId: entry.refId, title: entry.title, stage: entry.stage,
-      decision: entry.prevDecision, reason: entry.prevReason, action: 'undo',
+      decision: entry.prevDecision, reason: entry.prevReason, action: 'undo', dual,
     });
     if (entry.prevDecision == null) decidedRef.current.delete(key(entry.refId, entry.stage));
     else decidedRef.current.add(key(entry.refId, entry.stage));
@@ -395,7 +414,7 @@ export function ScreeningPage() {
     toast(`Undone — restored ${decisionText(entry.prevDecision, entry.prevReason)}`);
     if (entry.stage === stage) void openById(entry.refId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [undoStack, projectId, stage, openById, patchListCache, toast]);
+  }, [undoStack, projectId, stage, dual, openById, patchListCache, toast]);
   const undoRef = useRef(undo);
   undoRef.current = undo;
 
@@ -529,10 +548,13 @@ export function ScreeningPage() {
   if (!project || !settings) return <PageLoader />;
 
   // ---- Progress --------------------------------------------------------------
-  const done = stage === 'title_abstract' ? stats?.ta_screened ?? 0 : stats?.ft_screened ?? 0;
+  // Dual screening: progress is the reviewer's own decisions; the shared count is final decisions.
+  const done = dual
+    ? myStats.data?.reviewers.find((r) => r.reviewer_id === me && r.stage === stage)?.screened ?? 0
+    : stage === 'title_abstract' ? stats?.ta_screened ?? 0 : stats?.ft_screened ?? 0;
   const total = stage === 'title_abstract' ? stats?.after_dedup ?? 0 : stats?.ft_pool ?? 0;
-  const curDecision = current ? decisionOf(current, stage) : null;
-  const curReason = current ? reasonOf(current, stage) : null;
+  const curDecision = current ? decisionOf(current, stage, dual) : null;
+  const curReason = current ? reasonOf(current, stage, dual) : null;
 
   const stageTabs = settings.stage2_enabled && (
     <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium" role="tablist" aria-label="Screening stage">
@@ -565,11 +587,11 @@ export function ScreeningPage() {
         {(hasTeam || filters.by) && <ReviewedByFilter value={filters.by} onChange={(by) => setFilters({ by })} team={team} me={me} />}
         {filtersOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} idPrefix="sf" criteriaReady={hasTerms(criteria)} picoReady={hasPico(criteria)} />
+            <FiltersForm filters={filters} setFilters={setFilters} clearFilters={clearFilters} facets={facets} tags={tags} stage={stage} dual={dual} idPrefix="sf" criteriaReady={hasTerms(criteria)} picoReady={hasPico(criteria)} />
           </div>
         )}
         <div className="text-xs text-slate-600">
-          <div className="flex justify-between tabular-nums"><span><strong>{fmt(done)}</strong> / {fmt(total)} screened</span><span>{pct(done, total)}</span></div>
+          <div className="flex justify-between tabular-nums"><span><strong>{fmt(done)}</strong> / {fmt(total)} screened{dual ? ' by you' : ''}</span><span>{pct(done, total)}</span></div>
           <div className="mt-1"><ProgressBar value={done} max={total} label="Screening progress" /></div>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span>{listQuery.data ? `${fmt(listQuery.data.count)} match${listQuery.data.count === 1 ? 'es' : ''} current view` : ' '}</span>
@@ -585,7 +607,7 @@ export function ScreeningPage() {
               <label className="flex items-center gap-1">
                 <input type="checkbox" aria-label="Select all on this page"
                   checked={listQuery.data.rows.every((r) => sel.has(r.id))}
-                  onChange={(e) => sel.setMany(listQuery.data!.rows.map((r) => ({ id: r.id, decision: decisionOf(outbox.overlay(r as Reference), stage) })), e.target.checked)} />
+                  onChange={(e) => sel.setMany(listQuery.data!.rows.map((r) => ({ id: r.id, decision: decisionOf(outbox.overlay(r as Reference), stage, dual) })), e.target.checked)} />
                 Select page
               </label>
               {listQuery.data.count > listQuery.data.rows.length && !sel.allMatching && (
@@ -613,7 +635,7 @@ export function ScreeningPage() {
           <ul aria-label="Articles">
             {listQuery.data.rows.map((row: ReferenceListItem) => {
               const o = outbox.overlay(row as Reference);
-              const d = decisionOf(o, stage);
+              const d = decisionOf(o, stage, dual);
               const active = current?.id === row.id;
               const byIds = (stage === 'title_abstract' ? row.title_abstract_reviewers : row.full_text_reviewers) ?? [];
               const screenedBy = me && d && decidedRef.current.has(key(row.id)) && !byIds.includes(me) ? [...byIds, me] : byIds;
@@ -632,6 +654,7 @@ export function ScreeningPage() {
                       <span className="mt-0.5 block truncate text-xs text-slate-500">
                         {[row.authors?.split(';')[0], row.year, row.database_source].filter(Boolean).join(' · ')}
                         {row.duplicate_status === 'possible' && ' · ⚠ possible duplicate'}
+                        {dual && (stage === 'title_abstract' ? row.title_abstract_conflict : row.full_text_conflict) && <span className="font-medium text-amber-800"> · ⚠ conflict</span>}
                       </span>
                     </span>
                     {hasTeam && <ReviewerChips ids={screenedBy} map={reviewerMap} />}
@@ -663,7 +686,12 @@ export function ScreeningPage() {
 
   const detailPanels = current && (
     <div className="space-y-5">
-      {hasTeam && <ReviewerDecisions referenceId={current.id} stage={stage} team={team} me={me} version={`${historyVersion}:${curDecision}:${curReason}`} />}
+      {(hasTeam || dual) && (
+        <ReviewerDecisions referenceId={current.id} stage={stage} team={team} me={me} version={`${historyVersion}:${curDecision}:${curReason}`}
+          dual={dual} blind={settings?.blind ?? true} final={decisionOf(current, stage)}
+          conflict={!!(stage === 'title_abstract' ? current.title_abstract_conflict : current.full_text_conflict)}
+          canResolve={team.find((t) => t.user_id === me)?.role !== 'viewer'} onResolve={resolve} />
+      )}
       <AiPanel reference={current} stage={stage} projectId={projectId} onAccept={(d, r) => decide(d, r)} />
       <PicoCheck reference={current} terms={criteria} projectId={projectId} />
       <KeywordCheck reference={current} terms={criteria} projectId={projectId} />
@@ -711,7 +739,7 @@ export function ScreeningPage() {
           {!isXl && <Button size="sm" variant="subtle" onClick={() => setListOpen(true)} aria-label="Show article list, search and filters">☰ List</Button>}
           <span className="truncate text-xs text-slate-600 sm:text-sm">
             <strong className="text-ink-900">{stage === 'title_abstract' ? 'Title / abstract screening' : 'Full-text screening'}</strong>
-            <span className="tabular-nums"> · {fmt(done)} / {fmt(total)} screened</span>
+            <span className="tabular-nums"> · {fmt(done)} / {fmt(total)} screened{dual ? ' by you' : ''}</span>
             {stage === 'full_text' && total > 0 && (
               <span className="tabular-nums" data-testid="halfway"> · {done >= Math.ceil(total / 2) ? '✓ past halfway' : `${fmt(Math.ceil(total / 2) - done)} to halfway`}</span>
             )}
@@ -753,7 +781,7 @@ export function ScreeningPage() {
           <div className={cx(loading && 'opacity-60')}>
             {curDecision && (
               <div className="mx-auto max-w-3xl px-4 pt-4 sm:px-6">
-                <p className="text-sm">Current decision: <DecisionBadge decision={curDecision} reason={curReason} /></p>
+                <p className="text-sm">{dual ? 'Your decision' : 'Current decision'}: <DecisionBadge decision={curDecision} reason={curReason} /></p>
               </div>
             )}
             <ArticleView reference={current} stage={stage} terms={terms} criteria={criteria}
