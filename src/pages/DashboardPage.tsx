@@ -52,13 +52,13 @@ export function DashboardPage() {
             </div>
             <div className="mt-2"><ProgressBar value={s.ta_screened} max={s.after_dedup} label="Title/abstract screening progress" /></div>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-              <Stat label="Total records" value={fmt(s.total)} />
-              <Stat label="Duplicates" value={fmt(s.duplicates_removed)} sub={s.possible_duplicates ? `${fmt(s.possible_duplicates)} to review` : 'removed'} tone="muted" />
-              <Stat label="Unscreened" value={fmt(s.ta_unscreened)} />
-              <Stat label="Screened" value={fmt(s.ta_screened)} />
-              <Stat label="✓ Included" value={fmt(s.ta_include)} tone="include" />
-              <Stat label="✕ Excluded" value={fmt(s.ta_exclude)} tone="exclude" />
-              <Stat label="? Maybe" value={fmt(s.ta_maybe)} tone="maybe" />
+              <Stat flat label="Total records" value={fmt(s.total)} />
+              <Stat flat label="Duplicates" value={fmt(s.duplicates_removed)} sub={s.possible_duplicates ? `${fmt(s.possible_duplicates)} to review` : 'removed'} tone="muted" />
+              <Stat flat label="Unscreened" value={fmt(s.ta_unscreened)} />
+              <Stat flat label="Screened" value={fmt(s.ta_screened)} />
+              <Stat flat label="✓ Included" value={fmt(s.ta_include)} tone="include" />
+              <Stat flat label="✕ Excluded" value={fmt(s.ta_exclude)} tone="exclude" />
+              <Stat flat label="? Maybe" value={fmt(s.ta_maybe)} tone="maybe" />
             </div>
             {s.possible_duplicates > 0 && (
               <Alert kind="warning" className="mt-4">
@@ -75,10 +75,10 @@ export function DashboardPage() {
               </div>
               <div className="mt-2"><ProgressBar value={s.ft_screened} max={s.ft_pool} label="Full-text screening progress" /></div>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Full texts sought" value={fmt(s.ft_pool)} />
-                <Stat label="Awaiting assessment" value={fmt(s.ft_unscreened)} />
-                <Stat label="✓ Included" value={fmt(s.ft_include)} tone="include" />
-                <Stat label="✕ Excluded" value={fmt(s.ft_exclude)} tone="exclude" />
+                <Stat flat label="Full texts sought" value={fmt(s.ft_pool)} />
+                <Stat flat label="Awaiting assessment" value={fmt(s.ft_unscreened)} />
+                <Stat flat label="✓ Included" value={fmt(s.ft_include)} tone="include" />
+                <Stat flat label="✕ Excluded" value={fmt(s.ft_exclude)} tone="exclude" />
               </div>
               {s.ft_pool > 0 && (
                 <Button className="mt-4" onClick={() => nav(`/p/${projectId}/screening?stage=full_text`)}>Open full-text screening</Button>

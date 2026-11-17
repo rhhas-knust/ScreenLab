@@ -22,6 +22,7 @@ import type { Decision, Reference, ReferenceListItem, Stage } from '../lib/types
 import { DECISION_META, DecisionBadge, DecisionIcon } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
 import { FacetsPanel } from './FacetsPanel';
+import { IconCompass, IconDoc, IconFilter } from '../components/icons';
 import { SimilarPanel } from './SimilarPanel';
 import { Stars } from './RelevancePanel';
 import { stars } from '../lib/relevance';
@@ -585,13 +586,15 @@ export function ScreeningPage() {
             onChange={(e) => setSearchText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') setFilters({ q: searchText }); }} />
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          <Button size="sm" className="whitespace-nowrap" variant={activeFilterCount ? 'subtle' : 'ghost'} onClick={() => setFiltersOpen((x) => !x)} aria-expanded={filtersOpen}>
-            Filters{activeFilterCount ? ` (${activeFilterCount})` : ''} {filtersOpen ? '▴' : '▾'}
+        <div className="grid grid-cols-2 gap-1">
+          <Button size="sm" className="gap-1.5 whitespace-nowrap" variant={activeFilterCount || filtersOpen ? 'subtle' : 'secondary'} onClick={() => setFiltersOpen((x) => !x)} aria-expanded={filtersOpen}>
+            <IconFilter size={15} />Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
           </Button>
-          <Button size="sm" className="whitespace-nowrap" variant={browseOpen ? 'subtle' : 'ghost'} onClick={() => setBrowseOpen((x) => !x)} aria-expanded={browseOpen} data-testid="browse-toggle">Browse {browseOpen ? '▴' : '▾'}</Button>
-          <div className="ml-auto"><SortControl sort={sort} setSort={setSort} id="screen-sort" /></div>
+          <Button size="sm" className="gap-1.5 whitespace-nowrap" variant={browseOpen ? 'subtle' : 'secondary'} onClick={() => setBrowseOpen((x) => !x)} aria-expanded={browseOpen} data-testid="browse-toggle">
+            <IconCompass size={15} />Browse
+          </Button>
         </div>
+        <SortControl sort={sort} setSort={setSort} id="screen-sort" wide />
         {browseOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
             <FacetsPanel projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} />
@@ -776,7 +779,7 @@ export function ScreeningPage() {
             )}
           </span>
           <div className="ml-auto flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setCriteriaOpen(true)} aria-keyshortcuts="C"><span className="hidden sm:inline">Review</span> criteria</Button>
+            <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setCriteriaOpen(true)} aria-keyshortcuts="C" aria-label="Review criteria" title="Review criteria (C)"><IconDoc size={16} /><span className="hidden sm:inline">Criteria</span></Button>
             <Button size="sm" variant="ghost" onClick={() => setHelpOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">⌨<span className="hidden sm:inline"> Shortcuts</span></Button>
           </div>
         </div>

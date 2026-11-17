@@ -23,16 +23,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={show}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex flex-col items-center gap-2 px-3 lg:bottom-4">
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex flex-col items-center gap-2 px-3 lg:inset-x-auto lg:right-4 lg:bottom-4 lg:items-end lg:px-0">
         {items.map((t) => (
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
             className={cx(
-              'pointer-events-auto flex max-w-lg items-center gap-3 rounded-lg px-4 py-2.5 text-sm shadow-lg',
-              t.kind === 'error' ? 'bg-rose-800 text-white' : 'bg-ink-950 text-white',
+              'pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-sm shadow-lg lg:w-96',
+              t.kind === 'error' ? 'border-rose-400 bg-rose-900 text-white' : 'border-lens-400 bg-ink-950 text-white',
             )}
           >
+            <span aria-hidden="true" className={cx('font-bold', t.kind === 'error' ? 'text-rose-200' : 'text-lens-300')}>{t.kind === 'error' ? '!' : '✓'}</span>
             <span className="min-w-0 flex-1">{t.message}</span>
             {t.action && (
               <button

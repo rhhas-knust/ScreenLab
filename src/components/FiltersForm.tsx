@@ -1,7 +1,7 @@
 import type { RefFilters, RefSort, SortKey } from '../lib/api/references';
 import { KW_LABELS, PICO_FILTER_LABELS, SORT_LABELS } from '../lib/api/references';
 import type { Facets, Stage, Tag } from '../lib/types';
-import { Button, Input, Label, Select } from './ui';
+import { Button, Input, Label, Select, cx } from './ui';
 
 export function FiltersForm({
   filters, setFilters, clearFilters, facets, tags, stage, idPrefix = 'f', criteriaReady = false, picoReady = false, dual = false,
@@ -138,14 +138,14 @@ export function FiltersForm({
   );
 }
 
-export function SortControl({ sort, setSort, id = 'sort' }: { sort: RefSort; setSort: (s: RefSort) => void; id?: string }) {
+export function SortControl({ sort, setSort, id = 'sort', wide = false }: { sort: RefSort; setSort: (s: RefSort) => void; id?: string; /** Fill the available width (narrow panels). */ wide?: boolean }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 items-center gap-0.5">
       <label htmlFor={id} className="sr-only">Sort by</label>
-      <Select id={id} value={sort.key} onChange={(e) => { const key = e.target.value as SortKey; setSort({ key, dir: key === 'relevance' ? 'desc' : sort.dir }); }} className="py-1.5 text-xs">
+      <Select id={id} value={sort.key} onChange={(e) => { const key = e.target.value as SortKey; setSort({ key, dir: key === 'relevance' ? 'desc' : sort.dir }); }} className={cx('min-w-0 py-1.5 pl-2.5 text-xs', wide ? 'flex-1' : 'w-auto max-w-[10rem]')}>
         {Object.entries(SORT_LABELS).map(([k, l]) => <option key={k} value={k}>Sort: {l}</option>)}
       </Select>
-      <Button size="sm" variant="ghost" onClick={() => setSort({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
+      <Button size="sm" variant="ghost" className="px-2" onClick={() => setSort({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
         aria-label={sort.dir === 'asc' ? 'Ascending — switch to descending' : 'Descending — switch to ascending'} title={sort.dir === 'asc' ? 'Ascending' : 'Descending'}>
         {sort.dir === 'asc' ? '↑' : '↓'}
       </Button>

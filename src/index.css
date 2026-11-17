@@ -17,10 +17,19 @@
   --color-ink-900: #16325c;
   --color-ink-950: #0d1d36;
 
+  --color-lens-50: #effcf9;
+  --color-lens-100: #ccf7ee;
+  --color-lens-200: #9bede0;
   --color-lens-300: #5eead4;
+  --color-lens-400: #2dd4bf;
   --color-lens-500: #14b8a6;
   --color-lens-600: #0d9488;
   --color-lens-700: #0f766e;
+  --color-lens-800: #115e59;
+
+  /* Surfaces */
+  --color-canvas: #f4f6fa;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
 
   /* Standard palette as hex. Tailwind's defaults use oklch(), which Chrome only
      supports from version 111 — older Chromebooks would show no colour at all. */
@@ -33,6 +42,8 @@
   --color-green-50: #f0fdf4; --color-green-100: #dcfce7; --color-green-200: #bbf7d0; --color-green-300: #86efac; --color-green-400: #4ade80; --color-green-500: #22c55e; --color-green-600: #16a34a; --color-green-700: #15803d; --color-green-800: #166534; --color-green-900: #14532d; --color-green-950: #052e16;
   --color-orange-50: #fff7ed; --color-orange-100: #ffedd5; --color-orange-200: #fed7aa; --color-orange-300: #fdba74; --color-orange-400: #fb923c; --color-orange-500: #f97316; --color-orange-600: #ea580c; --color-orange-700: #c2410c; --color-orange-800: #9a3412; --color-orange-900: #7c2d12; --color-orange-950: #431407;
   --color-teal-50: #f0fdfa; --color-teal-100: #ccfbf1; --color-teal-200: #99f6e4; --color-teal-300: #5eead4; --color-teal-400: #2dd4bf; --color-teal-500: #14b8a6; --color-teal-600: #0d9488; --color-teal-700: #0f766e; --color-teal-800: #115e59; --color-teal-900: #134e4a; --color-teal-950: #042f2e;
+  --color-sky-50: #f0f9ff; --color-sky-100: #e0f2fe; --color-sky-200: #bae6fd; --color-sky-300: #7dd3fc; --color-sky-400: #38bdf8; --color-sky-500: #0ea5e9; --color-sky-600: #0284c7; --color-sky-700: #0369a1; --color-sky-800: #075985; --color-sky-900: #0c4a6e; --color-sky-950: #082f49;
+  --color-fuchsia-600: #c026d3; --color-indigo-500: #6366f1;
   --color-violet-50: #f5f3ff; --color-violet-100: #ede9fe; --color-violet-200: #ddd6fe; --color-violet-300: #c4b5fd; --color-violet-400: #a78bfa; --color-violet-500: #8b5cf6; --color-violet-600: #7c3aed; --color-violet-700: #6d28d9; --color-violet-800: #5b21b6; --color-violet-900: #4c1d95; --color-violet-950: #2e1065;
   --color-red-50: #fef2f2; --color-red-100: #fee2e2; --color-red-200: #fecaca; --color-red-300: #fca5a5; --color-red-400: #f87171; --color-red-500: #ef4444; --color-red-600: #dc2626; --color-red-700: #b91c1c; --color-red-800: #991b1b; --color-red-900: #7f1d1d; --color-red-950: #450a0a;
 }
@@ -49,7 +60,7 @@ html, body, #root { height: 100%; }
   }
 }
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-canvas text-slate-900 antialiased;
   font-family: var(--font-sans);
 }
 
@@ -58,6 +69,17 @@ body {
   outline: 3px solid var(--color-lens-500);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* File pickers look like ScreenLab's secondary buttons everywhere. */
+@layer base {
+  input[type='file'] { font-size: 0.875rem; color: var(--color-slate-600); }
+  input[type='file']::file-selector-button {
+    margin-right: 0.75rem; border: 1px solid var(--color-slate-300); border-radius: 0.5rem; background: #fff;
+    padding: 0.4rem 0.8rem; font: inherit; font-weight: 500; color: var(--color-ink-900); cursor: pointer;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  }
+  input[type='file']::file-selector-button:hover { background: var(--color-slate-50); border-color: var(--color-slate-400); }
 }
 
 .abstract-text p + p { margin-top: 0.75rem; }

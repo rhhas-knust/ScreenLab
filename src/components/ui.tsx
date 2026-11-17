@@ -6,11 +6,11 @@ export function cx(...c: (string | false | null | undefined)[]) {
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle';
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-ink-900 text-white hover:bg-ink-800 disabled:bg-ink-300',
-  secondary: 'bg-white text-ink-900 border border-slate-300 hover:bg-slate-50 disabled:text-slate-400',
-  ghost: 'text-ink-800 hover:bg-ink-50 disabled:text-slate-400',
-  danger: 'bg-rose-700 text-white hover:bg-rose-800 disabled:bg-rose-300',
-  subtle: 'bg-ink-50 text-ink-900 hover:bg-ink-100 disabled:text-slate-400',
+  primary: 'bg-ink-900 text-white shadow-sm hover:bg-ink-800 active:bg-ink-950 disabled:bg-ink-300 disabled:shadow-none',
+  secondary: 'bg-white text-ink-900 border border-slate-300 shadow-sm hover:border-slate-400 hover:bg-slate-50 disabled:text-slate-400 disabled:shadow-none',
+  ghost: 'text-ink-800 hover:bg-slate-100 disabled:text-slate-400',
+  danger: 'bg-rose-700 text-white shadow-sm hover:bg-rose-800 disabled:bg-rose-300',
+  subtle: 'bg-lens-50 text-lens-800 ring-1 ring-inset ring-lens-200 hover:bg-lens-100 disabled:text-slate-400',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; loading?: boolean }>(
@@ -58,7 +58,7 @@ export function PageLoader({ label = 'Loading…' }: { label?: string }) {
 }
 
 export function Card({ children, className, as: As = 'section' }: { children: ReactNode; className?: string; as?: 'section' | 'div' | 'article' }) {
-  return <As className={cx('rounded-xl border border-slate-200 bg-white shadow-sm', className)}>{children}</As>;
+  return <As className={cx('rounded-xl border border-slate-200/80 bg-white shadow-card', className)}>{children}</As>;
 }
 
 export function Label({ htmlFor, children, hint }: { htmlFor: string; children: ReactNode; hint?: ReactNode }) {
@@ -70,7 +70,7 @@ export function Label({ htmlFor, children, hint }: { htmlFor: string; children: 
   );
 }
 
-const inputBase = 'block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-lens-600 focus:outline-none focus:ring-2 focus:ring-lens-500/40 disabled:bg-slate-100';
+const inputBase = 'block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-xs placeholder:text-slate-400 hover:border-slate-400 focus:border-lens-600 focus:outline-none focus:ring-2 focus:ring-lens-500/30 disabled:bg-slate-100';
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...rest }, ref) {
   return <input ref={ref} className={cx(inputBase, className)} {...rest} />;
@@ -100,14 +100,14 @@ export function Field({ label, hint, children, id }: { label: string; hint?: str
 export function Alert({ kind = 'error', children, className }: { kind?: 'error' | 'info' | 'warning' | 'success'; children: ReactNode; className?: string }) {
   const styles = {
     error: 'border-rose-200 bg-rose-50 text-rose-900',
-    info: 'border-ink-200 bg-ink-50 text-ink-900',
+    info: 'border-sky-200 bg-sky-50 text-sky-950',
     warning: 'border-amber-300 bg-amber-50 text-amber-950',
     success: 'border-emerald-200 bg-emerald-50 text-emerald-900',
   }[kind];
   const icon = { error: '⚠', info: 'ℹ', warning: '⚠', success: '✓' }[kind];
   return (
-    <div role={kind === 'error' ? 'alert' : 'status'} className={cx('flex gap-2 rounded-lg border px-3 py-2 text-sm', styles, className)}>
-      <span aria-hidden="true" className="font-bold">{icon}</span>
+    <div role={kind === 'error' ? 'alert' : 'status'} className={cx('flex gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm leading-relaxed', styles, className)}>
+      <span aria-hidden="true" className="mt-px font-bold">{icon}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -118,7 +118,7 @@ export function ProgressBar({ value, max, label }: { value: number; max: number;
   return (
     <div>
       <div
-        className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200"
+        className="h-2 w-full overflow-hidden rounded-full bg-slate-200/80"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={max}
@@ -191,14 +191,14 @@ export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-xs text-slate-700 shadow-[0_1px_0_#cbd5e1]">{children}</kbd>;
 }
 
-export function Stat({ label, value, sub, tone = 'default' }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'default' | 'include' | 'exclude' | 'maybe' | 'muted' }) {
+export function Stat({ label, value, sub, tone = 'default', flat = false }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'default' | 'include' | 'exclude' | 'maybe' | 'muted'; /** Inside a card: a tinted tile instead of a card of its own. */ flat?: boolean }) {
   const toneCls = {
     default: 'text-ink-900', include: 'text-emerald-800', exclude: 'text-rose-800', maybe: 'text-amber-800', muted: 'text-slate-600',
   }[tone];
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase">{label}</div>
-      <div className={cx('mt-1 text-2xl font-semibold tabular-nums', toneCls)}>{value}</div>
+    <div className={flat ? 'rounded-lg bg-slate-50 px-3.5 py-3 ring-1 ring-inset ring-slate-100' : 'rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-card'}>
+      <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{label}</div>
+      <div className={cx('mt-1 text-2xl font-semibold tracking-tight tabular-nums', toneCls)}>{value}</div>
       {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
     </div>
   );
