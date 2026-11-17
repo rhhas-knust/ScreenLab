@@ -20,6 +20,7 @@ import { useMediaQuery } from '../lib/useMediaQuery';
 import type { Decision, Reference, ReferenceListItem, Stage } from '../lib/types';
 import { DECISION_META, DecisionBadge, DecisionIcon } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
+import { FacetsPanel } from './FacetsPanel';
 import { CriteriaView } from '../components/CriteriaView';
 import { Alert, Button, Input, Modal, PageLoader, ProgressBar, Spinner, cx } from '../components/ui';
 import { useToast } from '../components/Toast';
@@ -111,6 +112,7 @@ export function ScreeningPage() {
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -578,12 +580,27 @@ export function ScreeningPage() {
             onChange={(e) => setSearchText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') setFilters({ q: searchText }); }} />
         </div>
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1">
           <Button size="sm" className="whitespace-nowrap" variant={activeFilterCount ? 'subtle' : 'ghost'} onClick={() => setFiltersOpen((x) => !x)} aria-expanded={filtersOpen}>
             Filters{activeFilterCount ? ` (${activeFilterCount})` : ''} {filtersOpen ? '▴' : '▾'}
           </Button>
-          <SortControl sort={sort} setSort={setSort} id="screen-sort" />
+          <Button size="sm" className="whitespace-nowrap" variant={browseOpen ? 'subtle' : 'ghost'} onClick={() => setBrowseOpen((x) => !x)} aria-expanded={browseOpen} data-testid="browse-toggle">Browse {browseOpen ? '▴' : '▾'}</Button>
+          <div className="ml-auto"><SortControl sort={sort} setSort={setSort} id="screen-sort" /></div>
         </div>
+        {browseOpen && (
+          <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+            <FacetsPanel projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} />
+          </div>
+        )}
+        {(filters.author || filters.journal || filters.keyword) && (
+          <div className="flex flex-wrap gap-1 text-xs" data-testid="facet-chips">
+            {([['author', 'Author'], ['journal', 'Journal'], ['keyword', 'Keyword']] as const).filter(([k]) => filters[k]).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setFilters({ [k]: '' })} className="rounded-full bg-ink-900 px-2 py-0.5 text-white" aria-label={`Remove filter ${l}: ${filters[k]}`}>
+                {l}: {filters[k]} ✕
+              </button>
+            ))}
+          </div>
+        )}
         {(hasTeam || filters.by) && <ReviewedByFilter value={filters.by} onChange={(by) => setFilters({ by })} team={team} me={me} />}
         {filtersOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">

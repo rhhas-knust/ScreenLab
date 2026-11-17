@@ -23,6 +23,10 @@ export interface RefFilters {
   kw: '' | 'inc' | 'exc' | 'exc_only' | 'no_inc';
   /** PICO filter: all elements found / at least one missing / none found / a specific element missing. */
   pico: PicoFilter;
+  /** Facet filters from the "Browse" panel: an author, a journal or a keyword. */
+  author?: string;
+  journal?: string;
+  keyword?: string;
   /** Who screened it at this stage: '' anyone, 'me', 'partner', 'partner_not_me', 'not_me', or a reviewer's user id. */
   by: string;
   /** The project's criteria keywords (not stored in the URL; supplied by the page). */
@@ -59,7 +63,7 @@ export interface RefSort {
 
 export const DEFAULT_FILTERS: RefFilters = {
   q: '', status: 'all', source: '', yearFrom: '', yearTo: '', pubType: '', language: '', tags: [],
-  dup: 'active', ftStatus: '', reason: '', kw: '', pico: '', by: '',
+  dup: 'active', ftStatus: '', reason: '', kw: '', pico: '', by: '', author: '', journal: '', keyword: '',
 };
 export const DEFAULT_SORT: RefSort = { key: 'seq', dir: 'asc' };
 
@@ -148,6 +152,9 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.pubType) qb = qb.eq('publication_type', f.pubType);
   if (f.language) qb = qb.eq('language', f.language);
   if (f.tags.length) qb = qb.contains('tag_names', f.tags);
+  if (f.author) qb = qb.ilike('authors', `%${escapeLike(f.author)}%`);
+  if (f.journal) qb = qb.eq('journal', f.journal);
+  if (f.keyword) qb = qb.ilike('keywords', `%${escapeLike(f.keyword)}%`);
   if (f.ftStatus) qb = qb.eq('full_text_status', f.ftStatus);
   if (f.reason) qb = qb.eq(reasonColumn(stage, !!f.dual), f.reason);
   if (f.kw && f.terms) qb = applyKeywordFilter(qb, f.kw, f.terms);
@@ -400,4 +407,9 @@ export interface ReviewerStats {
 }
 export async function reviewerStats(projectId: string): Promise<ReviewerStats> {
   return (must(await supabase.rpc('reviewer_stats', { p_project_id: projectId })) ?? { reviewers: [], pairs: [], ta_conflicts: 0, ft_conflicts: 0 }) as ReviewerStats;
+}
+
+export type FacetKind = 'author' | 'journal' | 'keyword' | 'year' | 'publication_type' | 'language';
+export async function facetCounts(projectId: string, stage: Stage, kind: FacetKind, limit = 50): Promise<{ value: string; n: number }[]> {
+  return (must(await supabase.rpc('facet_counts', { p_project_id: projectId, p_stage: stage, p_kind: kind, p_limit: limit })) ?? []) as { value: string; n: number }[];
 }

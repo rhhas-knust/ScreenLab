@@ -1365,6 +1365,25 @@ try {
     await shot(page, '43-import-extractions');
   }
 
+  // ---------------------------------------------------------------- Browse: facets with counts
+  {
+    await page.goto(`${APP}/p/${projectId}/screening`);
+    await page.getByTestId('browse-toggle').click();
+    await page.getByTestId('facet-author').getByRole('button', { name: 'Authors' }).click();
+    const firstAuthor = page.getByTestId('facet-author').getByRole('listitem').first();
+    await firstAuthor.waitFor();
+    const [name, n] = (await firstAuthor.innerText()).split('\n').map((x) => x.trim());
+    await firstAuthor.getByRole('button').click();
+    await page.waitForURL(/au=/);
+    await page.getByTestId('facet-chips').waitFor();
+    await page.waitForFunction((want) => /(\d+) match/.exec(document.body.innerText)?.[1] === want, n);
+    const expected = sql(`select count(*) from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') and authors ilike '%${name.replace(/'/g, "''")}%'`);
+    check('Browse: authors listed with counts; clicking one filters the list to that author', n === expected, `${name}: ${n} vs ${expected}`);
+    await shot(page, '45-browse-facets');
+    await page.getByTestId('facet-chips').getByRole('button').click();
+    await page.waitForURL((u) => !u.searchParams.has('au'));
+  }
+
   // ---------------------------------------------------------------- Independent (dual) screening, blind mode, conflicts
   {
     await page.goto(`${APP}/p/${projectId}/settings#screening`);
