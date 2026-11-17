@@ -83,7 +83,7 @@ self.onmessage = (ev: MessageEvent<ParseRequest>) => {
     if (!format) {
       self.postMessage({
         ok: false,
-        error: 'Unsupported or unrecognised file. Please upload a CSV, RIS, BibTeX (.bib), PubMed (.nbib) file, or a .zip export (e.g. from Rayyan) containing one.',
+        error: 'Unsupported or unrecognised file. Please upload a CSV, RIS, BibTeX (.bib), PubMed (.nbib), Web of Science (.ciw) or EndNote XML file, or a .zip export (e.g. from Rayyan) containing one.',
       } satisfies ParseResponse);
       return;
     }

@@ -1,7 +1,7 @@
 import { unzipSync } from 'fflate';
 
 /** Reference-file extensions ScreenLab can read from inside a .zip (e.g. a Rayyan export). */
-const SUPPORTED = /\.(csv|tsv|txt|ris|bib|bibtex|nbib)$/i;
+const SUPPORTED = /\.(csv|tsv|txt|ris|bib|bibtex|nbib|ciw|xml)$/i;
 
 export interface ZipEntry {
   name: string;
@@ -42,7 +42,7 @@ export function readZip(buf: ArrayBuffer, wanted?: string): { entries: ZipEntry[
     .filter((e) => e.size > 0)
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
   if (!entries.length) {
-    throw new Error('The .zip file does not contain a reference file (CSV, RIS, BibTeX or PubMed). Please check the export.');
+    throw new Error('The .zip file does not contain a reference file (CSV, RIS, BibTeX, PubMed, Web of Science or EndNote XML). Please check the export.');
   }
   const name = wanted && files[wanted] ? wanted : entries[0].name;
   return { entries, name, text: decodeText(files[name]) };

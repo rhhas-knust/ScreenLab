@@ -14,8 +14,8 @@ import { Alert, Button, Card, Field, Input, ProgressBar, Select, Spinner } from 
 const SOURCES = ['PubMed', 'Scopus', 'Web of Science', 'IEEE Xplore', 'Google Scholar', 'Embase', 'CINAHL', 'Cochrane Library', 'PsycINFO', 'Other'];
 const MAX_FILE_MB = 100;
 
-const FORMAT_LABEL: Record<string, string> = { csv: 'CSV / TSV', ris: 'RIS', bibtex: 'BibTeX', medline: 'PubMed (MEDLINE / .nbib)' };
-const ACCEPT = '.csv,.tsv,.txt,.ris,.bib,.bibtex,.nbib,.zip';
+const FORMAT_LABEL: Record<string, string> = { csv: 'CSV / TSV', ris: 'RIS', bibtex: 'BibTeX', medline: 'PubMed (MEDLINE / .nbib)', wos: 'Web of Science (plain text / .ciw)', endnote: 'EndNote XML' };
+const ACCEPT = '.csv,.tsv,.txt,.ris,.bib,.bibtex,.nbib,.ciw,.xml,.zip';
 const FIELD_LABEL: Record<string, string> = {
   title: 'Title', authors: 'Authors', abstract: 'Abstract', year: 'Year', journal: 'Journal', volume: 'Volume', issue: 'Issue',
   pages: 'Pages', doi: 'DOI', pmid: 'PMID', url: 'URL', keywords: 'Keywords', publication_type: 'Publication type',
@@ -89,7 +89,7 @@ export function ImportPage() {
       return;
     }
     if (/\.(pdf|docx?|xlsx?|rar|7z|png|jpe?g)$/i.test(file.name)) {
-      setError('Unsupported file type. Please upload a CSV, RIS, BibTeX (.bib) or PubMed (.nbib / .txt) export, or a .zip export (e.g. from Rayyan). Excel files: use “Save as CSV” first.');
+      setError('Unsupported file type. Please upload a CSV, RIS, BibTeX (.bib), PubMed (.nbib / .txt), Web of Science (.txt / .ciw) or EndNote XML export, or a .zip export (e.g. from Rayyan). Excel files: use “Save as CSV” first.');
       return;
     }
     setPhase('parsing');
@@ -188,7 +188,7 @@ export function ImportPage() {
     <div className="mx-auto max-w-4xl px-4 py-6">
       <h1 className="text-2xl font-semibold text-ink-900">Import references</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Supported: <strong>CSV/TSV</strong>, <strong>RIS</strong>, <strong>BibTeX</strong> and <strong>PubMed (.nbib)</strong> exports from PubMed, Scopus,
+        Supported: <strong>CSV/TSV</strong>, <strong>RIS</strong>, <strong>BibTeX</strong>, <strong>PubMed (.nbib)</strong>, <strong>Web of Science</strong> (plain text / .ciw) and <strong>EndNote XML</strong> exports from PubMed, Scopus,
         Web of Science, Embase, CINAHL, IEEE Xplore, Google Scholar, Zotero, EndNote, Mendeley and others — and <strong>.zip</strong> exports such as
         Rayyan’s (your Rayyan decisions, exclusion reasons, labels and notes can be carried over). Nothing is imported until you confirm the preview.
       </p>

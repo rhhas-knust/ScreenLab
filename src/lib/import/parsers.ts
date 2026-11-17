@@ -4,7 +4,7 @@ import { clean, cleanMultiline, parseYear } from '../normalize';
 import { bibTypeLabel, headerRank, isPageEnd, isPageStart, mapHeader, normKey, risTypeLabel } from './fieldMap';
 import { parseRayyanNotes, type RayyanInfo } from './rayyan';
 
-export type ImportFormat = 'csv' | 'ris' | 'bibtex' | 'medline';
+export type ImportFormat = 'csv' | 'ris' | 'bibtex' | 'medline' | 'wos' | 'endnote';
 
 export interface ParsedRecord extends BibRecord {
   /** Original fields exactly as found in the file. */
@@ -48,6 +48,8 @@ export function detectFormat(fileName: string, text: string): ImportFormat | nul
   if (ext === 'ris') return 'ris';
   if (ext === 'bib' || ext === 'bibtex') return 'bibtex';
   if (ext === 'nbib') return 'medline';
+  if (ext === 'ciw' || /^\s*(FN |VR |PT [A-Z]\s*$)/m.test(head) && /^ER\s*$/m.test(text)) return 'wos';
+  if (ext === 'xml' || /<records>\s*<record>/i.test(head) || /^\s*<\?xml[^>]*>\s*<xml>\s*<records>/i.test(head)) return /<record>/i.test(text) ? 'endnote' : null;
   if (ext === 'csv' || ext === 'tsv') return 'csv';
   // Content sniffing for .txt and unknown extensions
   if (/^\s*TY {2}- /m.test(head)) return 'ris';
@@ -389,6 +391,111 @@ export function parseMedline(text: string): ParseResult {
 }
 
 // ---------------------------------------------------------------------------
+// Web of Science tagged ("Plain text" / .ciw): two-letter tags, ER ends a record
+// ---------------------------------------------------------------------------
+
+const WOS_MAP: Record<string, BibField | 'pageStart' | 'pageEnd'> = {
+  TI: 'title', AF: 'authors', AB: 'abstract', PY: 'year', SO: 'journal', VL: 'volume', IS: 'issue',
+  BP: 'pageStart', EP: 'pageEnd', DI: 'doi', PM: 'pmid', DE: 'keywords', ID: 'keywords', DT: 'publication_type', LA: 'language',
+};
+
+export function parseWos(text: string): ParseResult {
+  const lines = text.replace(/^\ufeff/, '').split(/\r\n|\r|\n/);
+  const records: ParsedRecord[] = [];
+  const malformed: ParseIssue[] = [];
+  const sourceFields = new Set<string>();
+  const unmapped = new Set<string>();
+  let tags: [string, string[]][] = [];
+  let last: [string, string[]] | null = null;
+  const flush = () => {
+    if (!tags.length) return;
+    const c: Collected = {};
+    const original: Record<string, unknown> = {};
+    const hasAf = tags.some(([t]) => t === 'AF');
+    for (const [tag, values] of tags) {
+      original[tag] = values.length === 1 ? values[0] : values;
+      const m = tag === 'AU' && !hasAf ? 'authors' : WOS_MAP[tag];
+      if (!m) { if (tag !== 'AU' && tag !== 'PT') unmapped.add(tag); continue; }
+      // Title, abstract and journal wrap over several lines; author and keyword lines are separate values.
+      const joined = ['title', 'abstract', 'journal'].includes(m) ? [values.join(' ')] : m === 'keywords' ? values.join('; ').split(/;\s*/) : values;
+      if (m === 'pageStart') c.pageStart = values[0];
+      else if (m === 'pageEnd') c.pageEnd = values[0];
+      else for (const v of joined) push(c, m, v);
+    }
+    push(c, 'database_source', 'Web of Science');
+    records.push(finalize(c, original, records.length + 1));
+    tags = [];
+    last = null;
+  };
+  lines.forEach((raw, idx) => {
+    if (/^(FN|VR|EF)\b/.test(raw)) return;
+    if (/^ER\s*$/.test(raw)) { flush(); return; }
+    const m = raw.match(/^([A-Z][A-Z0-9]) (.*)$/);
+    if (m) {
+      sourceFields.add(m[1]);
+      last = [m[1], [m[2].trim()]];
+      tags.push(last);
+    } else if (/^ {3}\S/.test(raw) && last) {
+      last[1].push(raw.trim());
+    } else if (raw.trim() !== '') {
+      malformed.push({ recordNo: null, line: idx + 1, message: `Line ${idx + 1}: unrecognised text "${raw.slice(0, 80)}"` });
+    }
+  });
+  flush();
+  return summarise('wos', records, malformed, sourceFields, unmapped);
+}
+
+// ---------------------------------------------------------------------------
+// EndNote XML (File → Export → XML)
+// ---------------------------------------------------------------------------
+
+const xmlText = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&(lt|gt|amp|quot|apos);|&#x([0-9a-f]+);|&#(\d+);/gi,
+  (_, n, h, d) => (n ? ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" } as Record<string, string>)[n] : String.fromCodePoint(h ? parseInt(h, 16) : Number(d)))).trim();
+const xmlAll = (xml: string, path: string[]): string[] => {
+  let parts = [xml];
+  for (const tag of path) parts = parts.flatMap((p) => [...p.matchAll(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'gi'))].map((m) => m[1]));
+  return parts.map(xmlText).filter(Boolean);
+};
+
+export function parseEndnoteXml(text: string): ParseResult {
+  const records: ParsedRecord[] = [];
+  const malformed: ParseIssue[] = [];
+  const sourceFields = new Set<string>();
+  const unmapped = new Set<string>();
+  const FIELDS: [BibField | 'notes', string[]][] = [
+    ['title', ['titles', 'title']], ['journal', ['titles', 'secondary-title']], ['journal', ['periodical', 'full-title']],
+    ['authors', ['contributors', 'authors', 'author']], ['abstract', ['abstract']], ['year', ['dates', 'year']],
+    ['volume', ['volume']], ['issue', ['number']], ['pages', ['pages']], ['doi', ['electronic-resource-num']],
+    ['keywords', ['keywords', 'keyword']], ['language', ['language']], ['url', ['urls', 'related-urls', 'url']], ['notes', ['notes']],
+  ];
+  const blocks = [...text.matchAll(/<record>([\s\S]*?)<\/record>/gi)];
+  for (const [, body] of blocks) {
+    const c: Collected = {};
+    const original: Record<string, unknown> = {};
+    for (const [f, path] of FIELDS) {
+      const vals = xmlAll(body, path);
+      if (!vals.length) continue;
+      sourceFields.add(path.join('/'));
+      original[path.join('/')] = vals.length === 1 ? vals[0] : vals;
+      if (f === 'notes') continue;
+      if (f === 'journal' && c.journal) continue;
+      for (const v of f === 'keywords' ? vals.flatMap((k) => k.split(/\r?\n|;\s*/)) : vals) push(c, f, v);
+    }
+    const doi = c.doi?.[0];
+    if (doi) c.doi = [doi.replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, '')];
+    const type = body.match(/<ref-type[^>]*name="([^"]+)"/i)?.[1];
+    if (type) { push(c, 'publication_type', type); original['ref-type'] = type; }
+    const acc = xmlAll(body, ['accession-num'])[0];
+    if (acc && /^\d{6,9}$/.test(acc)) push(c, 'pmid', acc);
+    const db = xmlAll(body, ['remote-database-name'])[0];
+    if (db) push(c, 'database_source', db);
+    records.push(finalize(c, original, records.length + 1));
+  }
+  if (!blocks.length) malformed.push({ recordNo: null, line: null, message: 'No <record> elements found in the EndNote XML file.' });
+  return summarise('endnote', records, malformed, sourceFields, unmapped);
+}
+
+// ---------------------------------------------------------------------------
 // BibTeX
 // ---------------------------------------------------------------------------
 
@@ -409,8 +516,11 @@ export function latexToText(s: string): string {
     .replace(/\\&/g, '&').replace(/\\%/g, '%').replace(/\\\$/g, '$').replace(/\\_/g, '_').replace(/\\#/g, '#')
     .replace(/\\textendash\b|--/g, '–').replace(/\\textemdash\b|---/g, '—')
     .replace(/\\(emph|textit|textbf|textsc|mathrm|text)\s*\{([^{}]*)\}/g, '$2')
+    // Escaped braces and backslashes are literal characters: keep them through the brace stripping.
+    .replace(/\\textbackslash\s*(\{\})?/g, '\u0001').replace(/\\\{/g, '\u0002').replace(/\\\}/g, '\u0003')
     .replace(/\\[a-zA-Z]+\s*/g, '')
-    .replace(/[{}]/g, '');
+    .replace(/[{}]/g, '')
+    .replace(/\u0001/g, '\\').replace(/\u0002/g, '{').replace(/\u0003/g, '}');
   return out.replace(/\s+/g, ' ').trim();
 }
 
@@ -574,5 +684,7 @@ export function parseByFormat(format: ImportFormat, text: string): ParseResult {
     case 'ris': return parseRis(text);
     case 'bibtex': return parseBibtex(text);
     case 'medline': return parseMedline(text);
+    case 'wos': return parseWos(text);
+    case 'endnote': return parseEndnoteXml(text);
   }
 }

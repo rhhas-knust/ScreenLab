@@ -8,7 +8,18 @@ const DUP_LABEL: Record<string, string> = {
 };
 const FT_LABEL: Record<string, string> = { not_available: 'Not available', available: 'Available', reviewed: 'Reviewed' };
 
-export function referencesToCsv(refs: Reference[]): string {
+/** Each reviewer's own decisions, for the per-reviewer columns of the CSV export. */
+export interface ReviewerVotes {
+  reviewers: { id: string; name: string }[];
+  /** key `${referenceId}:${stage}:${reviewerId}` */
+  votes: Map<string, { decision: string; reason: string | null }>;
+}
+
+export function referencesToCsv(refs: Reference[], rv?: ReviewerVotes): string {
+  const vote = (r: Reference, stage: string, id: string) => {
+    const v = rv?.votes.get(`${r.id}:${stage}:${id}`);
+    return v ? `${DECISION_LABEL[v.decision] ?? v.decision}${v.reason ? ` (${v.reason})` : ''}` : '';
+  };
   const rows = refs.map((r) => ({
     'ScreenLab ID': r.id,
     'Import order': r.seq,
@@ -39,6 +50,14 @@ export function referencesToCsv(refs: Reference[]): string {
     'Full-text status': FT_LABEL[r.full_text_status] ?? r.full_text_status,
     'Full-text URL': r.full_text_url ?? '',
     'Imported at': r.imported_at,
+    ...(rv && rv.reviewers.length ? {
+      'Title/Abstract conflict': r.title_abstract_conflict ? 'Yes' : '',
+      'Full-text conflict': r.full_text_conflict ? 'Yes' : '',
+      ...Object.fromEntries(rv.reviewers.flatMap((p) => [
+        [`Title/Abstract — ${p.name}`, vote(r, 'title_abstract', p.id)],
+        [`Full text — ${p.name}`, vote(r, 'full_text', p.id)],
+      ])),
+    } : {}),
   }));
   // BOM so Excel opens UTF-8 correctly
   return '﻿' + Papa.unparse(rows, { quotes: true });
@@ -88,6 +107,52 @@ export function referencesToRis(refs: Reference[]): string {
     out.push('ER  - ', '');
   }
   return out.join('\r\n');
+}
+
+const BIB_TYPE: Record<string, string> = { 'journal article': 'article', article: 'article', review: 'article', book: 'book', 'book chapter': 'incollection', 'conference paper': 'inproceedings', 'conference proceeding': 'proceedings', thesis: 'phdthesis', report: 'techreport' };
+const bibEscape = (v: string) => v.replace(/\\/g, '\\textbackslash{}').replace(/([{}%&$#_])/g, '\\$1').replace(/\r?\n+/g, ' ');
+
+/** BibTeX, one entry per record, with the screening decisions in the note field. */
+export function referencesToBibtex(refs: Reference[]): string {
+  const used = new Set<string>();
+  return refs.map((r) => {
+    const first = (r.authors ?? '').split(/;\s*/)[0]?.split(/[,\s]/)[0]?.replace(/[^A-Za-z]/g, '') || 'ref';
+    let key = `${first}${r.year ?? ''}_${r.seq}`;
+    while (used.has(key)) key += 'a';
+    used.add(key);
+    const fields: [string, unknown][] = [
+      ['title', r.title], ['author', (r.authors ?? '').split(/;\s*/).filter(Boolean).join(' and ')], ['year', r.year], ['journal', r.journal],
+      ['volume', r.volume], ['number', r.issue], ['pages', r.pages], ['doi', r.doi], ['pmid', r.pmid], ['url', r.url], ['abstract', r.abstract],
+      ['keywords', [r.keywords, ...(r.tag_names ?? []).map((t) => `screenlab-tag:${t}`)].filter(Boolean).join('; ')], ['language', r.language],
+      ['note', [`ScreenLab title/abstract: ${r.title_abstract_decision ? DECISION_LABEL[r.title_abstract_decision] : 'Unscreened'}${r.title_abstract_exclusion_reason ? ` (${r.title_abstract_exclusion_reason})` : ''}`,
+        r.full_text_decision ? `full text: ${DECISION_LABEL[r.full_text_decision]}${r.full_text_exclusion_reason ? ` (${r.full_text_exclusion_reason})` : ''}` : '',
+        r.notes ? `Notes: ${r.notes}` : ''].filter(Boolean).join('; ')],
+    ];
+    const body = fields.filter(([, v]) => v != null && v !== '').map(([k, v]) => `  ${k} = {${bibEscape(String(v))}}`).join(',\n');
+    return `@${BIB_TYPE[(r.publication_type ?? '').toLowerCase()] ?? 'article'}{${key},\n${body}\n}`;
+  }).join('\n\n') + '\n';
+}
+
+const xmlEsc = (v: unknown) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const st = (v: unknown) => `<style face="normal" font="default" size="100%">${xmlEsc(v)}</style>`;
+
+/** EndNote XML (imports into EndNote, Zotero and Mendeley), decisions in the notes. */
+export function referencesToEndnoteXml(refs: Reference[]): string {
+  const recs = refs.map((r, i) => {
+    const el = (tag: string, v: unknown) => (v == null || v === '' ? '' : `<${tag}>${st(v)}</${tag}>`);
+    const authors = (r.authors ?? '').split(/;\s*/).filter(Boolean).map((a) => `<author>${st(a)}</author>`).join('');
+    const kws = [...(r.keywords ?? '').split(/;\s*/), ...(r.tag_names ?? []).map((t) => `screenlab-tag:${t}`)].filter(Boolean).map((k) => `<keyword>${st(k)}</keyword>`).join('');
+    const notes = [`ScreenLab title/abstract: ${r.title_abstract_decision ? DECISION_LABEL[r.title_abstract_decision] : 'Unscreened'}${r.title_abstract_exclusion_reason ? ` (${r.title_abstract_exclusion_reason})` : ''}`,
+      r.full_text_decision ? `full text: ${DECISION_LABEL[r.full_text_decision]}${r.full_text_exclusion_reason ? ` (${r.full_text_exclusion_reason})` : ''}` : '', r.notes ?? ''].filter(Boolean).join('; ');
+    return `<record><rec-number>${i + 1}</rec-number><ref-type name="${xmlEsc(r.publication_type || 'Journal Article')}">17</ref-type>` +
+      (authors ? `<contributors><authors>${authors}</authors></contributors>` : '') +
+      `<titles>${el('title', r.title)}${el('secondary-title', r.journal)}</titles>` +
+      `${el('pages', r.pages)}${el('volume', r.volume)}${el('number', r.issue)}${kws ? `<keywords>${kws}</keywords>` : ''}` +
+      `${r.year ? `<dates><year>${st(r.year)}</year></dates>` : ''}${el('accession-num', r.pmid)}${el('electronic-resource-num', r.doi)}` +
+      `${el('abstract', r.abstract)}${el('notes', notes)}${el('remote-database-name', r.database_source)}${el('language', r.language)}` +
+      `${r.url ? `<urls><related-urls><url>${st(r.url)}</url></related-urls></urls>` : ''}</record>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8" ?><xml><records>${recs.join('')}</records></xml>\n`;
 }
 
 export function referencesToJson(refs: Reference[]): string {

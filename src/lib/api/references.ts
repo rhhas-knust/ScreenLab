@@ -490,3 +490,14 @@ export interface SimilarRef { id: string; seq: number; title: string | null; aut
 export async function similarReferences(referenceId: string, limit = 8): Promise<SimilarRef[]> {
   return (must(await supabase.rpc('similar_references', { p_reference_id: referenceId, p_limit: limit })) ?? []) as SimilarRef[];
 }
+
+/** Every reviewer decision the caller may see (blind mode hides others' until you decide), for exports. */
+export async function fetchAllVotes(projectId: string): Promise<{ reference_id: string; reviewer_id: string; stage: Stage; decision: Decision; exclusion_reason: string | null }[]> {
+  const out: { reference_id: string; reviewer_id: string; stage: Stage; decision: Decision; exclusion_reason: string | null }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const rows = must(await supabase.from('reviewer_decisions').select('reference_id,reviewer_id,stage,decision,exclusion_reason')
+      .eq('project_id', projectId).order('reference_id').order('reviewer_id').order('stage').range(from, from + 999)) as typeof out;
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+  }
+}
