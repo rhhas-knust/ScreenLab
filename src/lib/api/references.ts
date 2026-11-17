@@ -114,6 +114,43 @@ export function sortColumn(key: SortKey, stage: Stage): string {
   }
 }
 
+const SEARCH_FIELDS: Record<string, string> = {
+  title: 'title', ti: 'title', abstract: 'abstract', ab: 'abstract', author: 'authors', au: 'authors', authors: 'authors',
+  journal: 'journal', so: 'journal', keyword: 'keywords', kw: 'keywords', keywords: 'keywords', doi: 'doi', notes: 'notes', tag: 'tag_names',
+};
+export interface SearchClause { neg: boolean; alts: { col: string; term: string }[] }
+
+/**
+ * Search box syntax, as in Rayyan and the databases: words are ANDed;
+ * "quoted phrases"; OR between alternatives; NOT or a leading - to exclude;
+ * field:term for title, abstract, author, journal, keyword, doi, notes, tag.
+ * Everything is case-insensitive and matches part of a word.
+ */
+export function parseSearch(input: string): SearchClause[] {
+  const toks = [...input.matchAll(/(-?)(?:(\w+):)?(?:"([^"]*)"|(\S+))/g)].map((m) => {
+    const field = m[2]?.toLowerCase();
+    const known = field && SEARCH_FIELDS[field];
+    const word = (m[3] ?? m[4] ?? '').trim();
+    return { neg: m[1] === '-', col: known ? SEARCH_FIELDS[field] : 'search_text', term: (known || !field ? word : `${m[2]}:${word}`).toLowerCase(), raw: m[0] };
+  });
+  const out: SearchClause[] = [];
+  let neg = false, or = false;
+  for (const t of toks) {
+    if (t.raw === 'OR' || t.raw === '|') { or = out.length > 0; continue; }
+    if (t.raw === 'AND' || t.raw === '&') continue;
+    if (t.raw === 'NOT') { neg = true; continue; }
+    if (!t.term) continue;
+    const alt = { col: t.col === 'tag_names' ? 'tag_names' : t.col, term: t.term };
+    const isNeg = neg || t.neg;
+    if (or && !isNeg && !out[out.length - 1].neg) out[out.length - 1].alts.push(alt);
+    else out.push({ neg: isNeg, alts: [alt] });
+    neg = false; or = false;
+  }
+  // tag_names is an array: search its text form instead.
+  for (const c of out) for (const a of c.alts) if (a.col === 'tag_names') a.col = 'search_text';
+  return out.slice(0, 12);
+}
+
 /** Escape a value for use inside a PostgREST or=() filter. */
 function q(v: string | number): string {
   return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -150,8 +187,14 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
     case 'final_exclude': qb = qb.eq(fcol, 'exclude'); break;
   }
 
-  const terms = f.q.toLowerCase().split(/\s+/).map((t) => t.trim()).filter(Boolean).slice(0, 8);
-  for (const t of terms) qb = qb.ilike('search_text', `%${escapeLike(t)}%`);
+  for (const c of parseSearch(f.q)) {
+    if (c.alts.length === 1) {
+      const { col, term } = c.alts[0];
+      qb = c.neg ? qb.not(col, 'ilike', `%${escapeLike(term)}%`) : qb.ilike(col, `%${escapeLike(term)}%`);
+    } else {
+      qb = qb.or(c.alts.map((a) => `${a.col}.ilike.${q(`*${escapeLike(a.term)}*`)}`).join(','));
+    }
+  }
 
   if (f.source) qb = f.source === '__none__' ? qb.is('database_source', null) : qb.eq('database_source', f.source);
   const yf = parseInt(f.yearFrom, 10);
@@ -441,4 +484,9 @@ export async function saveRelevance(projectId: string, stage: Stage, scores: Map
   for (let i = 0; i < entries.length; i += 2000) {
     must(await supabase.rpc('set_relevance', { p_project_id: projectId, p_stage: stage, p_scores: Object.fromEntries(entries.slice(i, i + 2000)) }));
   }
+}
+
+export interface SimilarRef { id: string; seq: number; title: string | null; authors: string | null; year: number | null; title_abstract_decision: Decision | null; full_text_decision: Decision | null; score: number }
+export async function similarReferences(referenceId: string, limit = 8): Promise<SimilarRef[]> {
+  return (must(await supabase.rpc('similar_references', { p_reference_id: referenceId, p_limit: limit })) ?? []) as SimilarRef[];
 }

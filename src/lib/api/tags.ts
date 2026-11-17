@@ -57,3 +57,18 @@ export async function deleteReason(r: ExclusionReason): Promise<void> {
   must(await supabase.from('exclusion_reasons').delete().eq('id', r.id));
   await logActivity(r.project_id, 'settings', `Deleted exclusion reason "${r.label}" (existing decisions keep their reason text)`);
 }
+
+/** Add a tag to, or remove it from, many records at once (one activity entry). */
+export async function bulkTag(projectId: string, tag: Tag, ids: string[], add: boolean, onProgress?: (done: number) => void): Promise<void> {
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    if (add) {
+      must(await supabase.from('reference_tags')
+        .upsert(chunk.map((id) => ({ project_id: projectId, reference_id: id, tag_id: tag.id })), { onConflict: 'reference_id,tag_id', ignoreDuplicates: true }));
+    } else {
+      must(await supabase.from('reference_tags').delete().eq('tag_id', tag.id).in('reference_id', chunk));
+    }
+    onProgress?.(Math.min(ids.length, i + chunk.length));
+  }
+  await logActivity(projectId, 'tags', `${add ? 'Added' : 'Removed'} tag "${tag.name}" ${add ? 'to' : 'from'} ${ids.length} record${ids.length === 1 ? '' : 's'}`);
+}

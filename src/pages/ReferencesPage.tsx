@@ -14,6 +14,7 @@ import { Alert, Button, Card, Input, Spinner } from '../components/ui';
 import { DecisionBadge } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
 import { BulkDecisionBar } from '../components/BulkDecision';
+import { BulkTag } from '../components/BulkTag';
 import { Highlight } from '../components/Highlight';
 
 const PAGE = 100;
@@ -116,6 +117,11 @@ export function ReferencesPage() {
             extra={q.data && !sel.allMatching && pageAll && q.data.count > rows.length ? (
               <button type="button" className="text-ink-800 underline" onClick={sel.selectAllMatching}>Select all {fmt(q.data.count)} matching this view</button>
             ) : sel.allMatching ? <span className="text-ink-800">(all records matching the current search and filters)</span> : null} />
+        ) : null}
+        {sel.active ? (
+          <div className="mt-1"><BulkTag projectId={projectId} tags={tags ?? []}
+            getIds={async () => sel.allMatching ? (await fetchMatchingIds(projectId, stage, filters, sort)).map((r) => r.id) : [...sel.picked.keys()]}
+            onDone={afterBulk} /></div>
         ) : (
           <p className="px-1 py-2 text-xs text-slate-500">Tick records to include, exclude or mark maybe several at once{kwOn ? '' : '. Tip: add criteria keywords in Settings to highlight and filter by them'}.</p>
         )}

@@ -12,6 +12,7 @@ import { fmt, pct, qk, useCriteriaTerms, useFacets, useProject, useReasons, useS
 import { hasPico, hasTerms } from '../lib/criteria';
 import { useSelection } from '../lib/useSelection';
 import { BulkDecisionBar } from '../components/BulkDecision';
+import { BulkTag } from '../components/BulkTag';
 import { KeywordCheck } from '../components/CriteriaKeywords';
 import { PicoCheck } from '../components/Pico';
 import { outbox } from '../lib/outbox';
@@ -21,6 +22,7 @@ import type { Decision, Reference, ReferenceListItem, Stage } from '../lib/types
 import { DECISION_META, DecisionBadge, DecisionIcon } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
 import { FacetsPanel } from './FacetsPanel';
+import { SimilarPanel } from './SimilarPanel';
 import { Stars } from './RelevancePanel';
 import { stars } from '../lib/relevance';
 import { CriteriaView } from '../components/CriteriaView';
@@ -579,6 +581,7 @@ export function ScreeningPage() {
         <div>
           <label htmlFor="screen-search" className="sr-only">Search articles</label>
           <Input ref={searchRef} id="screen-search" type="search" placeholder="Search articles…  ( / )" value={searchText}
+            title={'Words are combined with AND. Also: "exact phrase", OR, NOT or -word, and fields such as title:, abstract:, author:, journal:, keyword:, doi:'}
             onChange={(e) => setSearchText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') setFilters({ q: searchText }); }} />
         </div>
@@ -639,6 +642,11 @@ export function ScreeningPage() {
                   ? (await fetchMatchingIds(projectId, stage, filters, sort)).map((r) => ({ id: r.id, decision: r.decision }))
                   : [...sel.picked].map(([id, decision]) => ({ id, decision }))}
                 onDone={afterBulk} onClear={sel.clear} />
+            )}
+            {sel.active && (
+              <BulkTag projectId={projectId} tags={tags}
+                getIds={async () => sel.allMatching ? (await fetchMatchingIds(projectId, stage, filters, sort)).map((r) => r.id) : [...sel.picked.keys()]}
+                onDone={afterBulk} />
             )}
           </div>
         )}
@@ -734,6 +742,7 @@ export function ScreeningPage() {
           )}
         </div>
       </div>
+      <SimilarPanel referenceId={current.id} stage={stage} onOpen={(id) => void openById(id)} />
       <HistoryPanel referenceId={current.id} version={`${historyVersion}`} />
     </div>
   );

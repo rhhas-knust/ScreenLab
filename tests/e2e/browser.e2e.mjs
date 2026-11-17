@@ -1417,6 +1417,29 @@ try {
       check('Relevance: the ★4+ filter keeps only records rated 4 or 5 stars',
         await page.waitForFunction((w) => /(\d+) match/.exec(document.body.innerText)?.[1] === w, want, { timeout: 10000 }).then(() => true, () => false), want);
       await shot(page, '46-relevance');
+      // Boolean / field search
+      await page.goto(`${APP}/p/${relId}/screening?q=${encodeURIComponent('title:"language model" NOT 10')}`);
+      await page.waitForFunction(() => /(\d+) match/.exec(document.body.innerText)?.[1] === '11', null, { timeout: 10000 }).catch(() => {});
+      check('Search: phrases, field search and NOT', /11 match/.test(await page.locator('body').innerText()));
+      await page.goto(`${APP}/p/${relId}/screening?q=${encodeURIComponent('wheat OR "language model"')}`);
+      await page.waitForFunction(() => /(\d+) match/.exec(document.body.innerText)?.[1] === '24', null, { timeout: 10000 }).catch(() => {});
+      check('Search: OR between alternatives', /24 match/.test(await page.locator('body').innerText()));
+      // Similar records
+      const llmRef = sql(`select id from study_references where project_id='${relId}' and title like 'Large language model%' order by seq limit 1`);
+      await page.goto(`${APP}/p/${relId}/screening?ref=${llmRef}`);
+      await page.getByTestId('similar-toggle').click();
+      await page.getByTestId('similar-item').first().waitFor();
+      const sims = await page.getByTestId('similar-item').allInnerTexts();
+      check('Similar records: lists the records most like this one', sims.length >= 5 && sims.every((t) => /language model/.test(t)), sims.slice(0, 3).join(' | '));
+      // Bulk tag on a selection
+      await page.goto(`${APP}/p/${relId}/screening?q=wheat`);
+      await page.getByTestId('select-mode').click();
+      await page.getByLabel('Select all on this page').check();
+      await page.locator('#bulk-tag').selectOption('__new');
+      page.once('dialog', (d) => d.accept('Agriculture'));
+      await page.getByTestId('bulk-tag-add').click();
+      await waitFor(() => sql(`select count(*) from study_references where project_id='${relId}' and 'Agriculture' = any(tag_names)`) === '12');
+      check('Bulk tag: adds a new tag to every selected record', sql(`select count(*) from study_references where project_id='${relId}' and 'Agriculture' = any(tag_names)`) === '12');
     }
   }
 
