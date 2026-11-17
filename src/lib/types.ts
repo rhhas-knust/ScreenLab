@@ -98,6 +98,9 @@ export interface Reference extends BibRecord {
   my_title_abstract_exclusion_reason?: string | null;
   my_full_text_decision?: 'include' | 'exclude' | null;
   my_full_text_exclusion_reason?: string | null;
+  /** Predicted probability of inclusion (0–1) from the relevance model, per stage. */
+  title_abstract_relevance?: number | null;
+  full_text_relevance?: number | null;
   /** Who has screened it at each stage (user ids, oldest first). */
   title_abstract_reviewers?: string[];
   full_text_reviewers?: string[];
@@ -116,7 +119,7 @@ export type ReferenceListItem = Pick<
   | 'full_text_decision' | 'full_text_exclusion_reason' | 'full_text_screened_at'
   | 'duplicate_status' | 'tag_names' | 'full_text_status' | 'title_abstract_reviewers' | 'full_text_reviewers'
   | 'title_abstract_conflict' | 'full_text_conflict' | 'my_title_abstract_decision' | 'my_title_abstract_exclusion_reason'
-  | 'my_full_text_decision' | 'my_full_text_exclusion_reason'
+  | 'my_full_text_decision' | 'my_full_text_exclusion_reason' | 'title_abstract_relevance' | 'full_text_relevance'
 >;
 
 export interface ExclusionReason {

@@ -5,7 +5,7 @@ import { PICO_KEYS, PICO_LABELS, activePico, type CriteriaTerms, type PicoKey } 
 
 export type StatusFilter = 'all' | 'unscreened' | 'screened' | 'include' | 'exclude' | 'maybe' | 'conflict' | 'final_include' | 'final_exclude';
 export type DupFilter = 'active' | 'all' | 'none' | 'possible' | 'duplicate' | 'kept' | 'merged';
-export type SortKey = 'seq' | 'title' | 'year' | 'authors' | 'status' | 'screened_at' | 'database_source';
+export type SortKey = 'seq' | 'title' | 'year' | 'authors' | 'status' | 'screened_at' | 'database_source' | 'relevance';
 
 export interface RefFilters {
   q: string;
@@ -23,6 +23,8 @@ export interface RefFilters {
   kw: '' | 'inc' | 'exc' | 'exc_only' | 'no_inc';
   /** PICO filter: all elements found / at least one missing / none found / a specific element missing. */
   pico: PicoFilter;
+  /** At least this many stars of predicted relevance (1–5). */
+  minStars?: number;
   /** Facet filters from the "Browse" panel: an author, a journal or a keyword. */
   author?: string;
   journal?: string;
@@ -69,14 +71,15 @@ export const DEFAULT_SORT: RefSort = { key: 'seq', dir: 'asc' };
 
 export const SORT_LABELS: Record<SortKey, string> = {
   seq: 'Import order', title: 'Title', year: 'Year', authors: 'Author', status: 'Screening status',
-  screened_at: 'Date screened', database_source: 'Database',
+  screened_at: 'Date screened', database_source: 'Database', relevance: 'Predicted relevance',
 };
 
 export const LIST_COLUMNS =
   'id,seq,title,authors,year,journal,database_source,title_abstract_decision,title_abstract_exclusion_reason,' +
   'title_abstract_screened_at,full_text_decision,full_text_exclusion_reason,full_text_screened_at,duplicate_status,tag_names,full_text_status,' +
   'title_abstract_reviewers,full_text_reviewers,title_abstract_conflict,full_text_conflict,' +
-  'my_title_abstract_decision,my_title_abstract_exclusion_reason,my_full_text_decision,my_full_text_exclusion_reason';
+  'my_title_abstract_decision,my_title_abstract_exclusion_reason,my_full_text_decision,my_full_text_exclusion_reason,' +
+  'title_abstract_relevance,full_text_relevance';
 
 /** Screening reads go through this view: the table plus the caller's own decisions. */
 export const REFS_VIEW = 'screening_refs';
@@ -87,6 +90,11 @@ export function decisionColumn(stage: Stage, mine = false) {
 export function reasonColumn(stage: Stage, mine = false) {
   return `${mine ? 'my_' : ''}${stage === 'title_abstract' ? 'title_abstract_exclusion_reason' : 'full_text_exclusion_reason'}`;
 }
+export function relevanceColumn(stage: Stage) {
+  return stage === 'title_abstract' ? 'title_abstract_relevance' : 'full_text_relevance';
+}
+/** Lowest predicted probability for each star rating (see lib/relevance stars()). */
+export const STAR_FLOOR: Record<number, number> = { 5: 0.8, 4: 0.6, 3: 0.4, 2: 0.2, 1: 0 };
 export function conflictColumn(stage: Stage) {
   return stage === 'title_abstract' ? 'title_abstract_conflict' : 'full_text_conflict';
 }
@@ -101,6 +109,7 @@ export function sortColumn(key: SortKey, stage: Stage): string {
   switch (key) {
     case 'status': return decisionColumn(stage);
     case 'screened_at': return screenedAtColumn(stage);
+    case 'relevance': return relevanceColumn(stage);
     default: return key;
   }
 }
@@ -152,6 +161,7 @@ export function applyFilters(query: Query, projectId: string, stage: Stage, f: R
   if (f.pubType) qb = qb.eq('publication_type', f.pubType);
   if (f.language) qb = qb.eq('language', f.language);
   if (f.tags.length) qb = qb.contains('tag_names', f.tags);
+  if (f.minStars && STAR_FLOOR[f.minStars] != null) qb = qb.gte(relevanceColumn(stage), STAR_FLOOR[f.minStars]);
   if (f.author) qb = qb.ilike('authors', `%${escapeLike(f.author)}%`);
   if (f.journal) qb = qb.eq('journal', f.journal);
   if (f.keyword) qb = qb.ilike('keywords', `%${escapeLike(f.keyword)}%`);
@@ -412,4 +422,23 @@ export async function reviewerStats(projectId: string): Promise<ReviewerStats> {
 export type FacetKind = 'author' | 'journal' | 'keyword' | 'year' | 'publication_type' | 'language';
 export async function facetCounts(projectId: string, stage: Stage, kind: FacetKind, limit = 50): Promise<{ value: string; n: number }[]> {
   return (must(await supabase.rpc('facet_counts', { p_project_id: projectId, p_stage: stage, p_kind: kind, p_limit: limit })) ?? []) as { value: string; n: number }[];
+}
+
+/** Every active record in a stage with its text and final decision, for the relevance model. */
+export async function relevanceDocs(projectId: string, stage: Stage): Promise<{ id: string; title: string | null; abstract: string | null; keywords: string | null; decision: Decision | null }[]> {
+  const col = decisionColumn(stage);
+  const out: { id: string; title: string | null; abstract: string | null; keywords: string | null; decision: Decision | null }[] = [];
+  for (let from = 0; ; from += 1000) {
+    let qb = supabase.from('study_references').select(`id,title,abstract,keywords,${col}`).eq('project_id', projectId).not('duplicate_status', 'in', '(duplicate,merged)');
+    if (stage === 'full_text') qb = qb.eq('title_abstract_decision', 'include');
+    const rows = must(await qb.order('seq').range(from, from + 999)) as unknown as Record<string, string | null>[];
+    out.push(...rows.map((r) => ({ id: r.id!, title: r.title, abstract: r.abstract, keywords: r.keywords, decision: r[col] as Decision | null })));
+    if (rows.length < 1000) return out;
+  }
+}
+export async function saveRelevance(projectId: string, stage: Stage, scores: Map<string, number>): Promise<void> {
+  const entries = [...scores].map(([id, p]) => [id, Math.round(p * 10000) / 10000] as const);
+  for (let i = 0; i < entries.length; i += 2000) {
+    must(await supabase.rpc('set_relevance', { p_project_id: projectId, p_stage: stage, p_scores: Object.fromEntries(entries.slice(i, i + 2000)) }));
+  }
 }

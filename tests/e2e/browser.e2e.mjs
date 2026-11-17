@@ -1382,6 +1382,42 @@ try {
     await shot(page, '45-browse-facets');
     await page.getByTestId('facet-chips').getByRole('button').click();
     await page.waitForURL((u) => !u.searchParams.has('au'));
+    // Predicted relevance: learns from include/exclude decisions, or says how many more it needs.
+    const inc = Number(sql(`select count(*) from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') and title_abstract_decision='include'`));
+    const exc = Number(sql(`select count(*) from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') and title_abstract_decision='exclude'`));
+    await page.getByTestId('relevance-run').click();
+    await page.getByTestId('relevance-note').waitFor();
+    const relNote = await page.getByTestId('relevance-note').textContent();
+    if (inc >= 5 && exc >= 5) {
+      await page.waitForURL(/sort=relevance/);
+      check('Relevance: rates every record from the decisions and sorts by the rating',
+        sql(`select count(*) from study_references where project_id='${projectId}' and duplicate_status not in ('duplicate','merged') and title_abstract_relevance is null`) === '0' && /Rated \d+ records/.test(relNote), relNote);
+    } else {
+      check('Relevance: explains how many decisions it needs before rating', new RegExp(`so far ${inc} included, ${exc} excluded`).test(relNote), relNote);
+    }
+    {
+      // A small review with enough decisions to learn from.
+      const relId = sql(`insert into projects(title, owner_id) select 'Relevance E2E', owner_id from projects where id='${projectId}' returning id`).split('\n')[0].trim();
+      const rows = [];
+      for (let i = 0; i < 12; i++) rows.push(`('${relId}', 'Large language model bias in clinical triage ${i}', 'LLM chatbot fairness for patients.', ${i < 8 ? "'include'" : 'null'})`);
+      for (let i = 0; i < 12; i++) rows.push(`('${relId}', 'Wheat crop yield under irrigation ${i}', 'Soil and fertiliser field trial.', ${i < 8 ? "'exclude'" : 'null'})`);
+      sql(`insert into study_references(project_id, title, abstract, title_abstract_decision) values ${rows.join(',')}`);
+      await page.goto(`${APP}/p/${relId}/screening`);
+      await page.getByTestId('browse-toggle').click();
+      await page.getByTestId('relevance-run').click();
+      await page.waitForURL(/sort=relevance/);
+      await page.getByTestId('relevance-note').waitFor();
+      const top = sql(`select title from study_references where project_id='${relId}' and title_abstract_decision is null order by title_abstract_relevance desc limit 4`);
+      check('Relevance: rates the unscreened records from the decisions; likely includes come first',
+        top.split('\n').every((t) => /language model/.test(t)) && /Rated 24 records/.test(await page.getByTestId('relevance-note').textContent()), top);
+      check('Relevance: stars shown on each paper in the list', await page.getByRole('img', { name: /Predicted relevance [1-5] of 5/ }).count() > 0);
+      await page.getByTestId('stars-4').click();
+      await page.waitForURL(/stars=4/);
+      const want = sql(`select count(*) from study_references where project_id='${relId}' and title_abstract_relevance >= 0.6`);
+      check('Relevance: the ★4+ filter keeps only records rated 4 or 5 stars',
+        await page.waitForFunction((w) => /(\d+) match/.exec(document.body.innerText)?.[1] === w, want, { timeout: 10000 }).then(() => true, () => false), want);
+      await shot(page, '46-relevance');
+    }
   }
 
   // ---------------------------------------------------------------- Independent (dual) screening, blind mode, conflicts

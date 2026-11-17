@@ -25,6 +25,7 @@ export function useFilterParams() {
     author: params.get('au') ?? '',
     journal: params.get('jn') ?? '',
     keyword: params.get('kwd') ?? '',
+    minStars: Number(params.get('stars')) || 0,
   }), [params]);
 
   const sort: RefSort = useMemo(() => ({
@@ -65,18 +66,19 @@ export function useFilterParams() {
     if ('author' in f) patch.au = f.author || null;
     if ('journal' in f) patch.jn = f.journal || null;
     if ('keyword' in f) patch.kwd = f.keyword || null;
+    if ('minStars' in f) patch.stars = f.minStars ? String(f.minStars) : null;
     update(patch);
   }, [update]);
 
   const clearFilters = useCallback(() => {
-    update({ q: null, status: null, source: null, yf: null, yt: null, pt: null, lang: null, tags: null, dup: null, fts: null, reason: null, kw: null, pico: null, by: null, au: null, jn: null, kwd: null });
+    update({ q: null, status: null, source: null, yf: null, yt: null, pt: null, lang: null, tags: null, dup: null, fts: null, reason: null, kw: null, pico: null, by: null, au: null, jn: null, kwd: null, stars: null });
   }, [update]);
 
   const setSort = useCallback((s: RefSort) => update({ sort: s.key === 'seq' ? null : s.key, dir: s.dir === 'asc' ? null : 'desc' }), [update]);
 
   const activeFilterCount = [
     filters.status !== 'all', filters.source, filters.yearFrom, filters.yearTo, filters.pubType, filters.language,
-    filters.tags.length, filters.dup !== 'active', filters.ftStatus, filters.reason, filters.kw, filters.pico, filters.by, filters.author, filters.journal, filters.keyword,
+    filters.tags.length, filters.dup !== 'active', filters.ftStatus, filters.reason, filters.kw, filters.pico, filters.by, filters.author, filters.journal, filters.keyword, filters.minStars,
   ].filter(Boolean).length;
 
   return { filters, sort, stage, refId, update, setFilters, clearFilters, setSort, activeFilterCount };

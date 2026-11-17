@@ -21,6 +21,8 @@ import type { Decision, Reference, ReferenceListItem, Stage } from '../lib/types
 import { DECISION_META, DecisionBadge, DecisionIcon } from '../components/Decision';
 import { FiltersForm, SortControl } from '../components/FiltersForm';
 import { FacetsPanel } from './FacetsPanel';
+import { Stars } from './RelevancePanel';
+import { stars } from '../lib/relevance';
 import { CriteriaView } from '../components/CriteriaView';
 import { Alert, Button, Input, Modal, PageLoader, ProgressBar, Spinner, cx } from '../components/ui';
 import { useToast } from '../components/Toast';
@@ -589,7 +591,7 @@ export function ScreeningPage() {
         </div>
         {browseOpen && (
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <FacetsPanel projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} />
+            <FacetsPanel projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} />
           </div>
         )}
         {(filters.author || filters.journal || filters.keyword) && (
@@ -674,7 +676,10 @@ export function ScreeningPage() {
                         {dual && (stage === 'title_abstract' ? row.title_abstract_conflict : row.full_text_conflict) && <span className="font-medium text-amber-800"> · ⚠ conflict</span>}
                       </span>
                     </span>
-                    {hasTeam && <ReviewerChips ids={screenedBy} map={reviewerMap} />}
+                    <span className="flex shrink-0 flex-col items-end gap-1">
+                      {hasTeam && <ReviewerChips ids={screenedBy} map={reviewerMap} />}
+                      <Stars n={stars(stage === 'title_abstract' ? row.title_abstract_relevance : row.full_text_relevance)} />
+                    </span>
                   </button>
                 </li>
               );

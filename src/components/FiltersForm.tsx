@@ -142,7 +142,7 @@ export function SortControl({ sort, setSort, id = 'sort' }: { sort: RefSort; set
   return (
     <div className="flex items-center gap-1">
       <label htmlFor={id} className="sr-only">Sort by</label>
-      <Select id={id} value={sort.key} onChange={(e) => setSort({ ...sort, key: e.target.value as SortKey })} className="py-1.5 text-xs">
+      <Select id={id} value={sort.key} onChange={(e) => { const key = e.target.value as SortKey; setSort({ key, dir: key === 'relevance' ? 'desc' : sort.dir }); }} className="py-1.5 text-xs">
         {Object.entries(SORT_LABELS).map(([k, l]) => <option key={k} value={k}>Sort: {l}</option>)}
       </Select>
       <Button size="sm" variant="ghost" onClick={() => setSort({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}

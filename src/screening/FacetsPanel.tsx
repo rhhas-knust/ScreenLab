@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { facetCounts, type FacetKind, type RefFilters } from '../lib/api/references';
+import { facetCounts, type FacetKind, type RefFilters, type RefSort } from '../lib/api/references';
+import { RelevancePanel } from './RelevancePanel';
 import type { Stage } from '../lib/types';
 import { Spinner, cx } from '../components/ui';
 
@@ -83,11 +84,12 @@ function Group({ projectId, stage, kind, label, filters, setFilters }: {
 }
 
 /** Browse the records in this stage by keyword, author, journal, year, type and language, with counts. */
-export function FacetsPanel({ projectId, stage, filters, setFilters }: {
-  projectId: string; stage: Stage; filters: RefFilters; setFilters: (f: Partial<RefFilters>) => void;
+export function FacetsPanel({ projectId, stage, filters, setFilters, sort, setSort }: {
+  projectId: string; stage: Stage; filters: RefFilters; setFilters: (f: Partial<RefFilters>) => void; sort: RefSort; setSort: (s: RefSort) => void;
 }) {
   return (
-    <div data-testid="facets">
+    <div data-testid="facets" className="space-y-2">
+      <RelevancePanel projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} sort={sort} setSort={setSort} />
       <p className="mb-1 text-xs text-slate-600">Counts are for all records {stage === 'full_text' ? 'at full text' : 'in this review'}. Click one to filter; click again to clear.</p>
       {GROUPS.map((g) => <Group key={g.kind} projectId={projectId} stage={stage} filters={filters} setFilters={setFilters} {...g} />)}
     </div>
